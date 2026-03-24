@@ -2,6 +2,7 @@ package com.shivam.jobcopilot.controller;
 
 import com.shivam.jobcopilot.service.GmailOAuthService;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +13,9 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/gmail")
 public class GmailController {
+
+    @Value("${app.frontend.url:http://localhost:4200}")
+    private String frontendUrl;
 
     private final GmailOAuthService gmailOAuthService;
 
@@ -33,10 +37,10 @@ public class GmailController {
         try {
             gmailOAuthService.handleCallback(code, state);
         } catch (Exception e) {
-            response.sendRedirect("http://localhost:4200/settings?gmail=error");
+            response.sendRedirect(frontendUrl + "/settings?gmail=error");
             return;
         }
-        response.sendRedirect("http://localhost:4200/settings?gmail=connected");
+        response.sendRedirect(frontendUrl + "/settings?gmail=connected");
     }
 
     @GetMapping("/status")
