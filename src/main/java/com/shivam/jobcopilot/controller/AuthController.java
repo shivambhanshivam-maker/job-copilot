@@ -6,6 +6,7 @@ import com.shivam.jobcopilot.dto.SignupRequest;
 import com.shivam.jobcopilot.entity.User;
 import com.shivam.jobcopilot.repository.UserRepository;
 import com.shivam.jobcopilot.security.JwtUtil;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -14,6 +15,9 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/auth")
 public class AuthController {
+
+    @Value("${app.signup.enabled:true}")
+    private boolean signupEnabled;
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
@@ -29,6 +33,9 @@ public class AuthController {
 
     @PostMapping("/signup")
     public ResponseEntity<AuthResponse> signup(@RequestBody SignupRequest request) {
+        if (!signupEnabled) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         if (userRepository.existsByEmail(request.email())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
