@@ -9,8 +9,10 @@ import com.shivam.jobcopilot.service.AnalyticsService;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -32,9 +34,15 @@ public class AnalyticsController {
         return analyticsService.getChannelEffectiveness(currentUserId(auth));
     }
 
+    @GetMapping("/funnel-filters")
+    public List<String> getFunnelFilters(Authentication auth) {
+        return analyticsService.getFunnelFilters(currentUserId(auth));
+    }
+
     @GetMapping("/funnel-conversion")
-    public FunnelConversionResponse getFunnelConversion(Authentication auth) {
-        return analyticsService.getFunnelConversion(currentUserId(auth));
+    public FunnelConversionResponse getFunnelConversion(Authentication auth,
+                                                        @RequestParam(required = false) String category) {
+        return analyticsService.getFunnelConversion(currentUserId(auth), category);
     }
 
     @GetMapping("/application-velocity")

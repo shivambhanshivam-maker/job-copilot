@@ -71,4 +71,22 @@ public interface JobApplicationRepository extends JpaRepository<JobApplication, 
     long countByUserIdAndCreatedAtBefore(UUID userId, LocalDateTime before);
 
     long countByUserIdAndFirstRespondedAtIsNotNullAndCreatedAtBefore(UUID userId, LocalDateTime before);
+
+    long countByUserIdAndApplicationStatusInAndCreatedAtBetween(UUID userId, List<String> statuses, LocalDateTime start, LocalDateTime end);
+
+    long countByUserIdAndFirstRespondedAtIsNotNullAndCreatedAtBetween(UUID userId, LocalDateTime start, LocalDateTime end);
+
+    // Category-filtered funnel queries (specific category)
+    @Query("SELECT COUNT(j) FROM JobApplication j WHERE j.userId = :userId AND j.roleCategory = :category AND j.applicationStatus IN :statuses")
+    long countByUserIdAndRoleCategoryAndApplicationStatusIn(@Param("userId") UUID userId, @Param("category") String category, @Param("statuses") List<String> statuses);
+
+    @Query("SELECT COUNT(j) FROM JobApplication j WHERE j.userId = :userId AND j.roleCategory = :category AND j.applicationStatus IN :statuses AND j.createdAt BETWEEN :start AND :end")
+    long countByUserIdAndRoleCategoryAndApplicationStatusInAndCreatedAtBetween(@Param("userId") UUID userId, @Param("category") String category, @Param("statuses") List<String> statuses, @Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    // Category-filtered funnel queries ("Others" = not in preferred categories)
+    @Query("SELECT COUNT(j) FROM JobApplication j WHERE j.userId = :userId AND (j.roleCategory NOT IN :categories OR j.roleCategory IS NULL) AND j.applicationStatus IN :statuses")
+    long countByUserIdAndRoleCategoryNotInAndApplicationStatusIn(@Param("userId") UUID userId, @Param("categories") List<String> categories, @Param("statuses") List<String> statuses);
+
+    @Query("SELECT COUNT(j) FROM JobApplication j WHERE j.userId = :userId AND (j.roleCategory NOT IN :categories OR j.roleCategory IS NULL) AND j.applicationStatus IN :statuses AND j.createdAt BETWEEN :start AND :end")
+    long countByUserIdAndRoleCategoryNotInAndApplicationStatusInAndCreatedAtBetween(@Param("userId") UUID userId, @Param("categories") List<String> categories, @Param("statuses") List<String> statuses, @Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
 }

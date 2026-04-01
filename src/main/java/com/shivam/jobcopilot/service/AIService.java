@@ -8,6 +8,7 @@ import reactor.core.publisher.Flux;
 public class AIService {
 
     private final ChatClient chatClient;
+    private final ChatClient postApplicationChatClient;
 
     public AIService(ChatClient.Builder chatClientBuilder) {
         this.chatClient = chatClientBuilder
@@ -17,7 +18,7 @@ public class AIService {
 
                         {
                           "fitScore": <integer 0-100, must equal the weighted average: sum(score * weight / 100) for each sub-score, rounded to nearest integer>,
-                          "recommendation": "<Apply | Apply with changes | Low priority>",
+                          "recommendation": "<Apply | Optimize & Apply | Ignore — must be derived from fitScore: Apply if ≥80, Optimize & Apply if 60-79, Ignore if <60>",
                           "confidence": "<High | Medium | Low>",
 
                           "subScores": {
@@ -68,10 +69,39 @@ public class AIService {
                         - Medium: JD or CV has some gaps in information.
                         - Low: JD is vague or CV lacks enough detail to assess reliably.
 
-                        Recommendation:
-                        - Apply: strong fit, CV presents it well.
-                        - Apply with changes: good underlying fit but CV needs targeted improvements before applying.
-                        - Low priority: fundamental gaps that are hard to bridge, or very weak fit.
+                        Recommendation (must be derived from fitScore — no exceptions):
+                        - Apply (fitScore ≥ 80): strong fit. cvAdjustments must be Medium or Low priority only — these are polish, not blockers.
+                        - Optimize & Apply (fitScore 60–79): good underlying fit but CV needs targeted improvements. cvAdjustments can include High priority — these are what would lift the score.
+                        - Ignore (fitScore < 60): fundamental gaps that CV polish cannot fix. cvAdjustments must be Low priority only.
+                        """)
+                .build();
+
+        this.postApplicationChatClient = this.chatClient.mutate()
+                .defaultSystem("""
+                        You are a post-application career coach. The candidate has already submitted their application.
+                        Your job is NOT to suggest CV changes — it is too late for that.
+                        Instead, help them maximise their chances from this point forward: what to learn, how to position themselves in the interview, what strengths to lead with, and which gaps the interviewer is likely to probe.
+                        You MUST respond with ONLY a valid JSON object — no markdown, no extra text.
+
+                        {
+                          "fitScore": <integer 0-100, an honest assessment of how well the CV matches the JD>,
+                          "interviewAngle": "<2-3 sentences on how the candidate should position themselves in the interview. Lead with their strongest differentiator for this specific role, then acknowledge and reframe their biggest gap.>",
+                          "skillGaps": [
+                            { "skill": "<specific skill or area they lack>", "priority": "<High | Medium | Low>", "action": "<concrete thing to do now to close this gap before the interview — e.g. build a project, take a short course, read documentation>" }
+                          ],
+                          "talkingPoints": [
+                            "<specific strength from the CV to lead with, framed for this company and role — be concrete, not generic>"
+                          ],
+                          "redFlags": [
+                            { "gap": "<gap the interviewer is likely to probe based on the JD>", "tip": "<how to address it confidently if asked>" }
+                          ]
+                        }
+
+                        Rules:
+                        - skillGaps: only include real gaps — skills or experience clearly required by the JD but absent or weak in the CV.
+                        - talkingPoints: 3-5 items, each specific to this company and role. Do not list generic strengths.
+                        - redFlags: only include gaps that a hiring manager for this specific role would actually scrutinise. Do not speculate.
+                        - fitScore: be honest — a low score here means more prep is needed, not that the application was a mistake.
                         """)
                 .build();
     }
@@ -99,5 +129,14 @@ public class AIService {
     public Flux<String> analyzeStream(String cvText, String jobDescription, String companyName, String roleTitle) {
         String enrichedJob = "Company: " + companyName + "\nRole: " + roleTitle + "\n\n" + jobDescription;
         return analyzeStream(cvText, enrichedJob);
+    }
+
+    public Flux<String> analyzePostApplicationStream(String cvText, String jobDescription,
+                                                     String companyName, String roleTitle) {
+        String enrichedJob = "Company: " + companyName + "\nRole: " + roleTitle + "\n\n" + jobDescription;
+        return postApplicationChatClient.prompt()
+                .user("CV:\n" + cvText + "\n\nJob Description:\n" + enrichedJob)
+                .stream()
+                .content();
     }
 }

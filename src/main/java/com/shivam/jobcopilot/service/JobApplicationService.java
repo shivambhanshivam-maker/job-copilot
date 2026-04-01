@@ -5,6 +5,7 @@ import com.shivam.jobcopilot.dto.MergeDecision;
 import com.shivam.jobcopilot.dto.PendingAction;
 import com.shivam.jobcopilot.entity.ApplicationUpdate;
 import com.shivam.jobcopilot.entity.JobApplication;
+import com.shivam.jobcopilot.entity.PostApplicationInsight;
 import com.shivam.jobcopilot.repository.FitAnalysisRepository;
 import com.shivam.jobcopilot.repository.JobApplicationRepository;
 import org.slf4j.Logger;
@@ -33,13 +34,16 @@ public class JobApplicationService {
     private final JobApplicationRepository repository;
     private final FitAnalysisRepository fitAnalysisRepository;
     private final EmailMergeDecisionService mergeDecisionService;
+    private final PostApplicationInsightService insightService;
 
     public JobApplicationService(JobApplicationRepository repository,
                                  FitAnalysisRepository fitAnalysisRepository,
-                                 EmailMergeDecisionService mergeDecisionService) {
+                                 EmailMergeDecisionService mergeDecisionService,
+                                 PostApplicationInsightService insightService) {
         this.repository = repository;
         this.fitAnalysisRepository = fitAnalysisRepository;
         this.mergeDecisionService = mergeDecisionService;
+        this.insightService = insightService;
     }
 
     public void upsert(JobApplicationEmail email, UUID userId) {
@@ -272,7 +276,21 @@ public class JobApplicationService {
     }
 
     public List<JobApplication> listAll(UUID userId) {
-        return repository.findByUserId(userId);
+        List<JobApplication> apps = repository.findByUserId(userId);
+        if (apps.isEmpty()) return apps;
+
+        Map<UUID, PostApplicationInsight> insightMap = insightService.findAllByApplicationIds(
+                apps.stream().map(JobApplication::getId).toList());
+
+        apps.forEach(app -> {
+            PostApplicationInsight insight = insightMap.get(app.getId());
+            if (insight != null) {
+                boolean stale = insightService.isStale(insight, app.getCvId(), app.getJobDescriptionText());
+                app.setFitSummary(new JobApplication.FitSummary(insight.getFitScore(), stale));
+            }
+        });
+
+        return apps;
     }
 
     public JobApplication getById(UUID id) {
@@ -297,6 +315,7 @@ public class JobApplicationService {
         if (isPresent(updated.getReferral())) existing.setReferral(updated.getReferral());
         if (updated.getInterviewDate() != null) existing.setInterviewDate(updated.getInterviewDate());
         if (updated.getCvId() != null) existing.setCvId(updated.getCvId());
+        if (isPresent(updated.getJobDescriptionText())) existing.setJobDescriptionText(updated.getJobDescriptionText());
         return repository.save(existing);
     }
 

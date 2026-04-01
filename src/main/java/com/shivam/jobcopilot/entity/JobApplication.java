@@ -48,6 +48,14 @@ public class JobApplication {
     // Nullable — CV used when applying for this role
     private UUID cvId;
 
+    @Column(columnDefinition = "TEXT")
+    private String jobDescriptionText;
+
+    @Transient
+    private FitSummary fitSummary;
+
+    public record FitSummary(int fitScore, boolean isStale) {}
+
     @Column(nullable = false)
     private UUID userId;
 
@@ -114,6 +122,12 @@ public class JobApplication {
 
     public UUID getCvId() { return cvId; }
     public void setCvId(UUID cvId) { this.cvId = cvId; }
+
+    public String getJobDescriptionText() { return jobDescriptionText; }
+    public void setJobDescriptionText(String jobDescriptionText) { this.jobDescriptionText = jobDescriptionText; }
+
+    public FitSummary getFitSummary() { return fitSummary; }
+    public void setFitSummary(FitSummary fitSummary) { this.fitSummary = fitSummary; }
 
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }

@@ -27,13 +27,24 @@ public class EmailClassificationService {
                         Step 1 — Classification:
                         Determine if this email is part of a specific, active or completed job application \
                         process involving the recipient. This includes: referrals, application confirmations, \
-                        interview invitations or updates, assessments, recruiter outreach for an ongoing process, \
-                        offers, or rejections.
+                        interview invitations or updates, offers, rejections, recruiter outreach for an ongoing \
+                        process, and assessments — but ONLY if the assessment is sent in the context of a \
+                        specific job application at a named employer (e.g. "complete this test as the next step \
+                        in your application at Stripe"). The assessment may be delivered via a third-party \
+                        platform (HackerRank, Alooba, Codility, etc.) but it must clearly relate to an active \
+                        hiring process for a specific role at a specific company.
                         Exclude: job alerts, job recommendations, saved job notifications, newsletters, \
-                        marketing emails, or messages encouraging the recipient to apply for a role.
+                        marketing emails, messages encouraging the recipient to apply for a role, and any \
+                        assessment or exercise that does NOT reference a specific job application — including \
+                        practice tests, free trials, "learning and development" exercises, and emails sent by \
+                        the assessment platform itself to promote their product or invite the recipient to try \
+                        their service. If no specific employer or role is identifiable as the requester, \
+                        it is not job-application related.
 
                         Step 2 — If job-application related, extract these fields:
-                        - company
+                        - company: the employer's brand name only. Strip any legal entity suffixes \
+                        (Inc, LLC, Ltd, Limited, Corp, Corporation, GmbH, Pvt Ltd, S.A., PLC, and similar). \
+                        For example: "Acme Corp" → "Acme", "Google LLC" → "Google", "Infosys BPM Ltd" → "Infosys BPM".
                         - job_title: extract the full role title exactly as stated in the email, including any \
                         product name, team, or geographic suffix (e.g. "TikTok Shop - Strategy Manager, Strategy & Analytics, EMEA"). \
                         Do not simplify or truncate it.

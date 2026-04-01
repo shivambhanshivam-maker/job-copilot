@@ -1,11 +1,11 @@
 package com.shivam.jobcopilot.dto;
 
 public record FunnelConversionResponse(
-        long resolvedApplications,    // Interview + Offer + Rejected + Closed (excludes pending "Applied")
-        long interviews,              // Interview + Offer
-        double appliedToInterviewRate,
-        double appliedToInterviewDelta, // vs prev week
+        long resolvedApplications,
+        long interviews,
+        double appliedToInterviewRate,       // all-time
+        double appliedToInterviewLast30Days, // last 30 days only
         long offers,
-        double interviewToOfferRate,
-        double interviewToOfferDelta    // vs prev week
+        double interviewToOfferRate,         // all-time
+        double interviewToOfferLast30Days    // last 30 days only
 ) {}
