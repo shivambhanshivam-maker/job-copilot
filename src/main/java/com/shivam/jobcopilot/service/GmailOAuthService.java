@@ -44,11 +44,14 @@ public class GmailOAuthService {
     private String redirectUri;
 
     private final UserGmailTokenRepository tokenRepository;
+    private final TokenEncryptionService encryptionService;
 
     private GoogleClientSecrets clientSecrets;
 
-    public GmailOAuthService(UserGmailTokenRepository tokenRepository) {
+    public GmailOAuthService(UserGmailTokenRepository tokenRepository,
+                             TokenEncryptionService encryptionService) {
         this.tokenRepository = tokenRepository;
+        this.encryptionService = encryptionService;
     }
 
     @PostConstruct
@@ -103,9 +106,9 @@ public class GmailOAuthService {
         UserGmailToken token = tokenRepository.findByUserId(userId)
                 .orElseGet(UserGmailToken::new);
         token.setUserId(userId);
-        token.setAccessToken(tokenResponse.getAccessToken());
+        token.setAccessToken(encryptionService.encrypt(tokenResponse.getAccessToken()));
         if (tokenResponse.getRefreshToken() != null) {
-            token.setRefreshToken(tokenResponse.getRefreshToken());
+            token.setRefreshToken(encryptionService.encrypt(tokenResponse.getRefreshToken()));
         }
         token.setExpiresAtEpochMs(tokenResponse.getExpiresInSeconds() != null
                 ? System.currentTimeMillis() + tokenResponse.getExpiresInSeconds() * 1000
@@ -126,8 +129,9 @@ public class GmailOAuthService {
                 .setJsonFactory(JSON_FACTORY)
                 .setClientSecrets(clientSecrets)
                 .build();
-        credential.setAccessToken(token.getAccessToken());
-        credential.setRefreshToken(token.getRefreshToken());
+        credential.setAccessToken(encryptionService.decrypt(token.getAccessToken()));
+        credential.setRefreshToken(token.getRefreshToken() != null
+                ? encryptionService.decrypt(token.getRefreshToken()) : null);
         if (token.getExpiresAtEpochMs() != null) {
             credential.setExpirationTimeMilliseconds(token.getExpiresAtEpochMs());
         }
@@ -135,7 +139,7 @@ public class GmailOAuthService {
         // Auto-refresh if expired or expiring soon
         if (credential.getExpiresInSeconds() != null && credential.getExpiresInSeconds() <= 60) {
             credential.refreshToken();
-            token.setAccessToken(credential.getAccessToken());
+            token.setAccessToken(encryptionService.encrypt(credential.getAccessToken()));
             token.setExpiresAtEpochMs(credential.getExpirationTimeMilliseconds());
             tokenRepository.save(token);
         }

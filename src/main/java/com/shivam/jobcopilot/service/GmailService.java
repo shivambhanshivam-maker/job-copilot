@@ -63,6 +63,15 @@ public class GmailService {
         for (UserGmailToken token : tokens) {
             try {
                 pollForUser(token.getUserId());
+            } catch (com.google.api.client.http.HttpResponseException e) {
+                if (e.getStatusCode() == 401 || e.getStatusCode() == 403) {
+                    log.warn("Auth failure for user {} (HTTP {}), disconnecting Gmail", token.getUserId(), e.getStatusCode());
+                    tokenRepository.deleteByUserId(token.getUserId());
+                    processedMessageIds.remove(token.getUserId());
+                    lastPollEpochSeconds.remove(token.getUserId());
+                } else {
+                    log.error("Error polling Gmail for user {}: {}", token.getUserId(), e.getMessage(), e);
+                }
             } catch (Exception e) {
                 log.error("Error polling Gmail for user {}: {}", token.getUserId(), e.getMessage(), e);
             }

@@ -316,6 +316,7 @@ public class JobApplicationService {
         if (updated.getInterviewDate() != null) existing.setInterviewDate(updated.getInterviewDate());
         if (updated.getCvId() != null) existing.setCvId(updated.getCvId());
         if (isPresent(updated.getJobDescriptionText())) existing.setJobDescriptionText(updated.getJobDescriptionText());
+        if (isPresent(updated.getNotes())) existing.setNotes(updated.getNotes());
         return repository.save(existing);
     }
 

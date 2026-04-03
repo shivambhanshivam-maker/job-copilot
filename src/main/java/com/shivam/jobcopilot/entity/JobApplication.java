@@ -51,6 +51,9 @@ public class JobApplication {
     @Column(columnDefinition = "TEXT")
     private String jobDescriptionText;
 
+    @Column(columnDefinition = "TEXT")
+    private String notes;
+
     @Transient
     private FitSummary fitSummary;
 
@@ -125,6 +128,9 @@ public class JobApplication {
 
     public String getJobDescriptionText() { return jobDescriptionText; }
     public void setJobDescriptionText(String jobDescriptionText) { this.jobDescriptionText = jobDescriptionText; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
 
     public FitSummary getFitSummary() { return fitSummary; }
     public void setFitSummary(FitSummary fitSummary) { this.fitSummary = fitSummary; }
