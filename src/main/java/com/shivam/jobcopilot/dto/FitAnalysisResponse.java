@@ -31,7 +31,7 @@ public class FitAnalysisResponse {
 
     public record GapItem(String gap, String category, String severity) {}
 
-    public record CvAdjustmentItem(String adjustment, String priority, String addressesGap) {}
+    public record CvAdjustmentItem(String adjustment, String priority, String addressesGap, String action, String cvPoint, String suggestedText) {}
 
     // --- Getters / Setters ---
 

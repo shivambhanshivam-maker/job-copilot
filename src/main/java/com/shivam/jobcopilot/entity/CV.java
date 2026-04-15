@@ -20,6 +20,9 @@ public class CV {
     @Column(columnDefinition = "TEXT")
     private String contentText;
 
+    @Column(columnDefinition = "TEXT")
+    private String contentMarkdown;
+
     private boolean isDefaultCv;
 
     private LocalDateTime createdAt;
@@ -50,6 +53,9 @@ public class CV {
 
     public String getContentText() { return contentText; }
     public void setContentText(String contentText) { this.contentText = contentText; }
+
+    public String getContentMarkdown() { return contentMarkdown; }
+    public void setContentMarkdown(String contentMarkdown) { this.contentMarkdown = contentMarkdown; }
 
     public boolean isDefaultCv() { return isDefaultCv; }
     public void setDefaultCv(boolean isDefaultCv) { this.isDefaultCv = isDefaultCv; }

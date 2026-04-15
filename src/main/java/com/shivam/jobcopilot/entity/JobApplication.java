@@ -72,7 +72,7 @@ public class JobApplication {
 
     @PrePersist
     protected void onCreate() {
-        this.createdAt = LocalDateTime.now();
+        if (this.createdAt == null) this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
     }
 
