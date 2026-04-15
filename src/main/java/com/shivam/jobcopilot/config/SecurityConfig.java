@@ -33,7 +33,7 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
-                        .requestMatchers("/auth/**", "/api/gmail/callback", "/h2-console/**", "/role-categories").permitAll()
+                        .requestMatchers("/auth/**", "/api/gmail/callback", "/api/outlook/callback", "/h2-console/**", "/role-categories").permitAll()
                         .anyRequest().authenticated()
                 )
                 .headers(h -> h.frameOptions(fo -> fo.disable()))

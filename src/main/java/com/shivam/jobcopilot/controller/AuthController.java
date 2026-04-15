@@ -73,6 +73,7 @@ public class AuthController {
         app1.setApplicationStatus("Rejected");
         app1.setRecruiterName("Sarah Mitchell");
         app1.setRecruiterEmail("s.mitchell@revolut.com");
+        app1.setCreatedAt(now.minusDays(25));
         app1.setFirstRespondedAt(now.minusDays(18));
         app1.setNotes(sampleNote);
         app1.getUpdates().addAll(List.of(
@@ -82,16 +83,17 @@ public class AuthController {
                 new ApplicationUpdate(now.minusDays(3), "Received rejection email after final round.")
         ));
 
-        // 2. Product Manager at Google — Interview Scheduled
+        // 2. Product Manager at Google — Interview
         JobApplication app2 = new JobApplication();
         app2.setUserId(user.getId());
         app2.setCompany("Google");
         app2.setJobTitle("Product Manager");
         app2.setRoleCategory("Product Management");
-        app2.setApplicationStatus("Interview Scheduled");
+        app2.setApplicationStatus("Interview");
         app2.setRecruiterName("James Park");
         app2.setRecruiterEmail("jpark@google.com");
         app2.setInterviewDate(now.plusDays(5));
+        app2.setCreatedAt(now.minusDays(14));
         app2.setFirstRespondedAt(now.minusDays(7));
         app2.setNotes(sampleNote);
         app2.getUpdates().addAll(List.of(
@@ -106,6 +108,7 @@ public class AuthController {
         app3.setCompany("Microsoft");
         app3.setJobTitle("Software Engineer II");
         app3.setRoleCategory("Software Engineering");
+        app3.setCreatedAt(now.minusDays(2));
         app3.setApplicationStatus("Applied");
         app3.setNotes(sampleNote);
         app3.getUpdates().addAll(List.of(

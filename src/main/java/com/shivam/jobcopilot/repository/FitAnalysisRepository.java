@@ -15,7 +15,7 @@ public interface FitAnalysisRepository extends JpaRepository<FitAnalysis, UUID> 
     // Per-user queries
     List<FitAnalysis> findByUserId(UUID userId);
 
-    Optional<FitAnalysis> findByUserIdAndCompanyIgnoreCaseAndJobTitleIgnoreCase(UUID userId, String company, String jobTitle);
+    List<FitAnalysis> findByUserIdAndCompanyIgnoreCaseAndJobTitleIgnoreCaseOrderByAnalyzedAtDesc(UUID userId, String company, String jobTitle);
 
     List<FitAnalysis> findByUserIdAndCompanyIgnoreCase(UUID userId, String company);
 }

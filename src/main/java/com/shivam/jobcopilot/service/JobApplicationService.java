@@ -233,9 +233,12 @@ public class JobApplicationService {
         if (app.getUserId() == null) return;
 
         fitAnalysisRepository
-                .findByUserIdAndCompanyIgnoreCaseAndJobTitleIgnoreCase(app.getUserId(), app.getCompany(), app.getJobTitle())
+                .findByUserIdAndCompanyIgnoreCaseAndJobTitleIgnoreCaseOrderByAnalyzedAtDesc(app.getUserId(), app.getCompany(), app.getJobTitle())
+                .stream().findFirst()
                 .ifPresent(fa -> {
                     app.setFitAnalysisId(fa.getId());
+                    if (app.getCvId() == null) app.setCvId(fa.getCvId());
+                    if (!isPresent(app.getJobDescriptionText())) app.setJobDescriptionText(fa.getJobDescriptionText());
                     repository.save(app);
                 });
     }

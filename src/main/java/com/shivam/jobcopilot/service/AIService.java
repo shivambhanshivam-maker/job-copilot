@@ -43,7 +43,7 @@ public class AIService {
                           "positioningAngle": "<2-3 sentence strategic narrative. Reference the candidate's strongest differentiator, acknowledge the biggest gap and frame around it, and tailor specifically to this company and role.>",
 
                           "cvAdjustments": [
-                            { "adjustment": "<specific CV improvement>", "priority": "<High | Medium | Low>", "addressesGap": "<the specific gap this addresses, or null>" }
+                            { "adjustment": "<specific CV improvement>", "priority": "<High | Medium | Low>", "addressesGap": "<the specific gap this addresses, or null>", "action": "<rewrite | add | remove>", "cvPoint": "<quote the exact bullet or line from the CV that this adjustment targets — null for 'add' actions>", "suggestedText": "<the concrete rewrite or new bullet text — null for 'remove' actions>" }
                           ]
                         }
 
@@ -73,6 +73,12 @@ public class AIService {
                         - Apply (fitScore ≥ 80): strong fit. cvAdjustments must be Medium or Low priority only — these are polish, not blockers.
                         - Optimize & Apply (fitScore 60–79): good underlying fit but CV needs targeted improvements. cvAdjustments can include High priority — these are what would lift the score.
                         - Ignore (fitScore < 60): fundamental gaps that CV polish cannot fix. cvAdjustments must be Low priority only.
+
+                        cvAdjustments — rules:
+                        - action must be one of: "rewrite" (improve an existing bullet), "add" (new bullet to add), "remove" (delete an existing bullet).
+                        - cvPoint: for "rewrite" and "remove" actions, quote the exact bullet or line from the CV verbatim. For "add" actions, set to null.
+                        - suggestedText: for "rewrite" and "add" actions, provide the concrete improved or new bullet text ready to paste. For "remove" actions, set to null.
+                        - Distribute suggestions across the full CV — do not cluster on opening bullets. Target the most impactful improvements regardless of where they appear in the CV.
                         """)
                 .build();
 
@@ -136,6 +142,17 @@ public class AIService {
         String enrichedJob = "Company: " + companyName + "\nRole: " + roleTitle + "\n\n" + jobDescription;
         return postApplicationChatClient.prompt()
                 .user("CV:\n" + cvText + "\n\nJob Description:\n" + enrichedJob)
+                .stream()
+                .content();
+    }
+
+    public Flux<String> reAnalyzeStream(String cvText, String jobDescription,
+                                        String companyName, String roleTitle,
+                                        String previousContext) {
+        String enrichedJob = "Company: " + companyName + "\nRole: " + roleTitle + "\n\n" + jobDescription;
+        String userMessage = previousContext + "Updated CV:\n" + cvText + "\n\nJob Description:\n" + enrichedJob;
+        return chatClient.prompt()
+                .user(userMessage)
                 .stream()
                 .content();
     }

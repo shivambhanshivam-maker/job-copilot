@@ -129,7 +129,7 @@ public class ChatbotTools {
     public Map<String, Object> getFitAnalysis(String company, String jobTitle) {
         UUID userId = getUserId();
         Optional<FitAnalysis> fa = userId != null
-                ? fitAnalysisRepository.findByUserIdAndCompanyIgnoreCaseAndJobTitleIgnoreCase(userId, company, jobTitle)
+                ? fitAnalysisRepository.findByUserIdAndCompanyIgnoreCaseAndJobTitleIgnoreCaseOrderByAnalyzedAtDesc(userId, company, jobTitle).stream().findFirst()
                 : fitAnalysisRepository.findByCompanyIgnoreCaseAndJobTitleIgnoreCase(company, jobTitle);
         if (fa.isEmpty()) {
             Map<String, Object> notFound = new HashMap<>();

@@ -1,7 +1,7 @@
 package com.shivam.jobcopilot.controller;
 
-import com.shivam.jobcopilot.repository.UserGmailTokenRepository;
-import com.shivam.jobcopilot.service.GmailOAuthService;
+import com.shivam.jobcopilot.repository.UserOutlookTokenRepository;
+import com.shivam.jobcopilot.service.OutlookOAuthService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -13,25 +13,25 @@ import java.util.Map;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/gmail")
-public class GmailController {
+@RequestMapping("/api/outlook")
+public class OutlookController {
 
     @Value("${app.frontend.url:http://localhost:4200}")
     private String frontendUrl;
 
-    private final GmailOAuthService gmailOAuthService;
-    private final UserGmailTokenRepository gmailTokenRepository;
+    private final OutlookOAuthService outlookOAuthService;
+    private final UserOutlookTokenRepository outlookTokenRepository;
 
-    public GmailController(GmailOAuthService gmailOAuthService,
-                           UserGmailTokenRepository gmailTokenRepository) {
-        this.gmailOAuthService = gmailOAuthService;
-        this.gmailTokenRepository = gmailTokenRepository;
+    public OutlookController(OutlookOAuthService outlookOAuthService,
+                             UserOutlookTokenRepository outlookTokenRepository) {
+        this.outlookOAuthService = outlookOAuthService;
+        this.outlookTokenRepository = outlookTokenRepository;
     }
 
     @GetMapping("/connect")
     public Map<String, String> connect(Authentication auth) throws Exception {
         UUID userId = (UUID) auth.getPrincipal();
-        String url = gmailOAuthService.buildAuthorizationUrl(userId);
+        String url = outlookOAuthService.buildAuthorizationUrl(userId);
         return Map.of("url", url);
     }
 
@@ -40,24 +40,24 @@ public class GmailController {
                          @RequestParam String state,
                          HttpServletResponse response) throws IOException {
         try {
-            gmailOAuthService.handleCallback(code, state);
+            outlookOAuthService.handleCallback(code, state);
         } catch (Exception e) {
-            response.sendRedirect(frontendUrl + "/settings?gmail=error");
+            response.sendRedirect(frontendUrl + "/settings?outlook=error");
             return;
         }
-        response.sendRedirect(frontendUrl + "/settings?gmail=connected");
+        response.sendRedirect(frontendUrl + "/settings?outlook=connected");
     }
 
     @GetMapping("/status")
     public Map<String, Boolean> status(Authentication auth) {
         UUID userId = (UUID) auth.getPrincipal();
-        return Map.of("connected", gmailOAuthService.isConnected(userId));
+        return Map.of("connected", outlookOAuthService.isConnected(userId));
     }
 
     @PostMapping("/disconnect")
     public ResponseEntity<Void> disconnect(Authentication auth) {
         UUID userId = (UUID) auth.getPrincipal();
-        gmailTokenRepository.deleteByUserId(userId);
+        outlookTokenRepository.deleteByUserId(userId);
         return ResponseEntity.noContent().build();
     }
 }

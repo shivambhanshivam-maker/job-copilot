@@ -52,6 +52,11 @@ public class FitAnalysisService {
         return persistFromJson(json, jobDescriptionText, cvId, company, jobTitle, null);
     }
 
+    public FitAnalysis getById(UUID id) {
+        return fitAnalysisRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("FitAnalysis not found: " + id));
+    }
+
     @Transactional
     public FitAnalysis save(String company, String jobTitle, String jobDescriptionText,
                             UUID cvId, FitAnalysisResponse response, UUID userId) {
@@ -60,46 +65,8 @@ public class FitAnalysisService {
         fa.setJobTitle(jobTitle);
         fa.setJobDescriptionText(jobDescriptionText);
         fa.setCvId(cvId);
-        fa.setFitScore(response.getFitScore());
-        fa.setRecommendation(response.getRecommendation());
-        fa.setConfidence(response.getConfidence());
-        fa.setWeightageReasoning(response.getWeightageReasoning());
-
-        FitAnalysisResponse.SubScores ss = response.getSubScores();
-        if (ss != null) {
-            if (ss.skillsMatch() != null)     { fa.setSkillsMatchScore(ss.skillsMatch().score());         fa.setSkillsMatchWeight(ss.skillsMatch().weight()); }
-            if (ss.experienceMatch() != null) { fa.setExperienceMatchScore(ss.experienceMatch().score()); fa.setExperienceMatchWeight(ss.experienceMatch().weight()); }
-            if (ss.domainMatch() != null)     { fa.setDomainMatchScore(ss.domainMatch().score());         fa.setDomainMatchWeight(ss.domainMatch().weight()); }
-            if (ss.impactMatch() != null)     { fa.setImpactMatchScore(ss.impactMatch().score());         fa.setImpactMatchWeight(ss.impactMatch().weight()); }
-            if (ss.cvPresentation() != null)  { fa.setCvPresentationScore(ss.cvPresentation().score());  fa.setCvPresentationWeight(ss.cvPresentation().weight()); }
-        }
-
-        if (response.getStrengthAlignment() != null) {
-            List<StrengthItem> strengths = response.getStrengthAlignment().stream()
-                    .map(s -> new StrengthItem(s.strength(), s.category()))
-                    .toList();
-            fa.setStrengthAlignment(strengths);
-        }
-
-        fa.setDifferentiation(response.getDifferentiation());
-
-        if (response.getGaps() != null) {
-            List<GapItem> gaps = response.getGaps().stream()
-                    .map(g -> new GapItem(g.gap(), g.category(), g.severity()))
-                    .toList();
-            fa.setGaps(gaps);
-        }
-
-        fa.setPositioningAngle(response.getPositioningAngle());
-
-        if (response.getCvAdjustments() != null) {
-            List<CvAdjustmentItem> adjustments = response.getCvAdjustments().stream()
-                    .map(a -> new CvAdjustmentItem(a.adjustment(), a.priority(), a.addressesGap()))
-                    .toList();
-            fa.setCvAdjustments(adjustments);
-        }
-
         fa.setUserId(userId);
+        populate(fa, response);
 
         FitAnalysis saved = fitAnalysisRepository.save(fa);
 
@@ -121,6 +88,58 @@ public class FitAnalysisService {
         }
 
         return saved;
+    }
+
+    // Replaces all analysis fields on an existing record in place (same ID, same job application link).
+    public Optional<FitAnalysis> replaceFromJson(String json, UUID existingId, UUID cvId, UUID userId) {
+        try {
+            FitAnalysisResponse parsed = objectMapper.readValue(json, FitAnalysisResponse.class);
+            FitAnalysis existing = getById(existingId);
+            existing.setCvId(cvId);
+            populate(existing, parsed);
+            return Optional.of(fitAnalysisRepository.save(existing));
+        } catch (Exception e) {
+            log.error("Failed to replace fit analysis after re-analysis stream completed", e);
+            return Optional.empty();
+        }
+    }
+
+    private void populate(FitAnalysis fa, FitAnalysisResponse response) {
+        fa.setFitScore(response.getFitScore());
+        fa.setRecommendation(response.getRecommendation());
+        fa.setConfidence(response.getConfidence());
+        fa.setWeightageReasoning(response.getWeightageReasoning());
+
+        FitAnalysisResponse.SubScores ss = response.getSubScores();
+        if (ss != null) {
+            if (ss.skillsMatch() != null)     { fa.setSkillsMatchScore(ss.skillsMatch().score());         fa.setSkillsMatchWeight(ss.skillsMatch().weight()); }
+            if (ss.experienceMatch() != null) { fa.setExperienceMatchScore(ss.experienceMatch().score()); fa.setExperienceMatchWeight(ss.experienceMatch().weight()); }
+            if (ss.domainMatch() != null)     { fa.setDomainMatchScore(ss.domainMatch().score());         fa.setDomainMatchWeight(ss.domainMatch().weight()); }
+            if (ss.impactMatch() != null)     { fa.setImpactMatchScore(ss.impactMatch().score());         fa.setImpactMatchWeight(ss.impactMatch().weight()); }
+            if (ss.cvPresentation() != null)  { fa.setCvPresentationScore(ss.cvPresentation().score());  fa.setCvPresentationWeight(ss.cvPresentation().weight()); }
+        }
+
+        if (response.getStrengthAlignment() != null) {
+            fa.setStrengthAlignment(response.getStrengthAlignment().stream()
+                    .map(s -> new StrengthItem(s.strength(), s.category()))
+                    .toList());
+        }
+
+        fa.setDifferentiation(response.getDifferentiation());
+
+        if (response.getGaps() != null) {
+            fa.setGaps(response.getGaps().stream()
+                    .map(g -> new GapItem(g.gap(), g.category(), g.severity()))
+                    .toList());
+        }
+
+        fa.setPositioningAngle(response.getPositioningAngle());
+
+        if (response.getCvAdjustments() != null) {
+            fa.setCvAdjustments(response.getCvAdjustments().stream()
+                    .map(a -> new CvAdjustmentItem(a.adjustment(), a.priority(), a.addressesGap(), a.action(), a.cvPoint(), a.suggestedText()))
+                    .toList());
+        }
     }
 
     // Overload without userId — for backwards compat with scheduler

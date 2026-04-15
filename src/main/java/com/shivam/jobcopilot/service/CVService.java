@@ -48,4 +48,22 @@ public class CVService {
         return cvRepository.findByUserIdAndIsDefaultCvTrue(userId)
                 .orElseThrow(() -> new RuntimeException("No default CV set"));
     }
+
+    public CV updateContent(UUID id, String contentMarkdown) {
+        CV cv = getById(id);
+        cv.setContentMarkdown(contentMarkdown);
+        cv.setContentText(stripMarkdown(contentMarkdown));
+        return cvRepository.save(cv);
+    }
+
+    private String stripMarkdown(String markdown) {
+        if (markdown == null) return null;
+        return markdown
+                .replaceAll("(?m)^#{1,6}\\s*", "")
+                .replaceAll("\\*\\*(.+?)\\*\\*", "$1")
+                .replaceAll("\\*(.+?)\\*", "$1")
+                .replaceAll("(?m)^[-*+]\\s+", "")
+                .replaceAll("(?m)^\\d+\\.\\s+", "")
+                .trim();
+    }
 }
