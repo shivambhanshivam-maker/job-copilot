@@ -7,6 +7,7 @@ import com.shivam.jobcopilot.entity.ApplicationUpdate;
 import com.shivam.jobcopilot.entity.JobApplication;
 import com.shivam.jobcopilot.entity.User;
 import com.shivam.jobcopilot.repository.AllowedEmailRepository;
+import com.shivam.jobcopilot.repository.AdvisorRepository;
 import com.shivam.jobcopilot.repository.JobApplicationRepository;
 import com.shivam.jobcopilot.repository.UserRepository;
 import com.shivam.jobcopilot.security.JwtUtil;
@@ -24,17 +25,20 @@ public class AuthController {
 
     private final UserRepository userRepository;
     private final AllowedEmailRepository allowedEmailRepository;
+    private final AdvisorRepository advisorRepository;
     private final JobApplicationRepository jobApplicationRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtUtil jwtUtil;
 
     public AuthController(UserRepository userRepository,
                           AllowedEmailRepository allowedEmailRepository,
+                          AdvisorRepository advisorRepository,
                           JobApplicationRepository jobApplicationRepository,
                           PasswordEncoder passwordEncoder,
                           JwtUtil jwtUtil) {
         this.userRepository = userRepository;
         this.allowedEmailRepository = allowedEmailRepository;
+        this.advisorRepository = advisorRepository;
         this.jobApplicationRepository = jobApplicationRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
@@ -57,7 +61,7 @@ public class AuthController {
         seedSampleApplications(saved);
 
         String token = jwtUtil.generateToken(saved.getId());
-        return ResponseEntity.ok(new AuthResponse(token, saved.getId(), saved.getEmail(), saved.getName()));
+        return ResponseEntity.ok(new AuthResponse(token, saved.getId(), saved.getEmail(), saved.getName(), false, "STUDENT"));
     }
 
     private void seedSampleApplications(User user) {
@@ -128,7 +132,24 @@ public class AuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
 
+        boolean advisorAccess = advisorRepository.existsByUserIdAndIsActiveTrue(user.getId());
+        String accountMode = normalizeAccountMode(request.accountMode());
+
+        if ("ADVISOR".equals(accountMode) && !advisorAccess) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        if ("STUDENT".equals(accountMode) && advisorAccess) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
         String token = jwtUtil.generateToken(user.getId());
-        return ResponseEntity.ok(new AuthResponse(token, user.getId(), user.getEmail(), user.getName()));
+        return ResponseEntity.ok(new AuthResponse(token, user.getId(), user.getEmail(), user.getName(), advisorAccess, accountMode));
+    }
+
+    private String normalizeAccountMode(String accountMode) {
+        if (accountMode == null || accountMode.isBlank()) {
+            return "STUDENT";
+        }
+        return "ADVISOR".equalsIgnoreCase(accountMode) ? "ADVISOR" : "STUDENT";
     }
 }

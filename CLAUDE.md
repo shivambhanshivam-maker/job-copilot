@@ -2,7 +2,7 @@
 
 ## Tech Stack
 - **Java 21**, Spring Boot 3, Spring Data JPA
-- **Spring AI** (OpenAI, model: `gpt-5.2`) — all LLM calls go through `ChatClient`
+- **Spring AI** (OpenAI, model: `gpt-5.6-luna`) — all LLM calls go through `ChatClient`
 - **H2 file-based DB** at `./data/jobcopilot` (persists across restarts)
 - **Gmail API** for email polling (OAuth2, tokens stored in `./tokens/`)
 

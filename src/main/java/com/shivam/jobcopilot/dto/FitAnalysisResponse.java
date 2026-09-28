@@ -5,6 +5,8 @@ import java.util.List;
 public class FitAnalysisResponse {
 
     private int fitScore;
+    private String companyNameRaw;
+    private String companyNameCanonical;
     private String recommendation;
     private String confidence;
     private SubScores subScores;
@@ -12,6 +14,7 @@ public class FitAnalysisResponse {
     private List<StrengthItem> strengthAlignment;
     private List<String> differentiation;
     private List<GapItem> gaps;
+    private List<JdRequirement> jdRequirements;
     private String positioningAngle;
     private List<CvAdjustmentItem> cvAdjustments;
 
@@ -31,12 +34,37 @@ public class FitAnalysisResponse {
 
     public record GapItem(String gap, String category, String severity) {}
 
+    public record JdRequirement(
+            String id,
+            String requirement,
+            String capability,
+            String importance,
+            String relevance,
+            String evidenceType,
+            String sourceExcerpt,
+            RequirementEvidence evidence
+    ) {}
+
+    public record RequirementEvidence(
+            String status,
+            String evidenceType,
+            String evidenceText,
+            String artifact,
+            String confidence
+    ) {}
+
     public record CvAdjustmentItem(String adjustment, String priority, String addressesGap, String action, String cvPoint, String suggestedText) {}
 
     // --- Getters / Setters ---
 
     public int getFitScore() { return fitScore; }
     public void setFitScore(int fitScore) { this.fitScore = fitScore; }
+
+    public String getCompanyNameRaw() { return companyNameRaw; }
+    public void setCompanyNameRaw(String companyNameRaw) { this.companyNameRaw = companyNameRaw; }
+
+    public String getCompanyNameCanonical() { return companyNameCanonical; }
+    public void setCompanyNameCanonical(String companyNameCanonical) { this.companyNameCanonical = companyNameCanonical; }
 
     public String getRecommendation() { return recommendation; }
     public void setRecommendation(String recommendation) { this.recommendation = recommendation; }
@@ -58,6 +86,9 @@ public class FitAnalysisResponse {
 
     public List<GapItem> getGaps() { return gaps; }
     public void setGaps(List<GapItem> gaps) { this.gaps = gaps; }
+
+    public List<JdRequirement> getJdRequirements() { return jdRequirements; }
+    public void setJdRequirements(List<JdRequirement> jdRequirements) { this.jdRequirements = jdRequirements; }
 
     public String getPositioningAngle() { return positioningAngle; }
     public void setPositioningAngle(String positioningAngle) { this.positioningAngle = positioningAngle; }

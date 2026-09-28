@@ -16,6 +16,34 @@ import java.util.UUID;
 @Repository
 public interface JobApplicationRepository extends JpaRepository<JobApplication, UUID> {
 
+    interface PeerEvidenceApplicationRow {
+        UUID getUserId();
+        String getRoleCategory();
+        String getApplicationStatus();
+        LocalDateTime getInterviewDate();
+        LocalDateTime getCreatedAt();
+        LocalDateTime getUpdatedAt();
+        UUID getFitAnalysisId();
+    }
+
+    /**
+     * Scalar application data used by school read models. Keeping this as a
+     * projection avoids loading the eager email-update collection for every
+     * student on the advisor pages.
+     */
+    interface SchoolApplicationRow {
+        UUID getId();
+        UUID getUserId();
+        String getCompany();
+        String getJobTitle();
+        String getRoleCategory();
+        String getApplicationStatus();
+        LocalDateTime getInterviewDate();
+        LocalDateTime getCreatedAt();
+        LocalDateTime getUpdatedAt();
+        LocalDateTime getFirstRespondedAt();
+    }
+
     Optional<JobApplication> findByCompanyAndJobTitle(String company, String jobTitle);
 
     Optional<JobApplication> findByCompanyIgnoreCaseAndJobTitleIgnoreCase(String company, String jobTitle);
@@ -42,9 +70,53 @@ public interface JobApplicationRepository extends JpaRepository<JobApplication, 
     // Per-user queries
     List<JobApplication> findByUserId(UUID userId);
 
+    List<JobApplication> findByUserIdIn(List<UUID> userIds);
+
+    @Query(value = """
+            SELECT id,
+                   user_id AS userId,
+                   COALESCE(NULLIF(company_name_raw, ''), NULLIF(company, ''), company_name_canonical) AS company,
+                   job_title AS jobTitle,
+                   role_category AS roleCategory,
+                   application_status AS applicationStatus,
+                   interview_date AS interviewDate,
+                   created_at AS createdAt,
+                   updated_at AS updatedAt,
+                   first_responded_at AS firstRespondedAt
+            FROM job_applications
+            WHERE user_id IN (:userIds)
+            """, nativeQuery = true)
+    List<SchoolApplicationRow> findSchoolApplicationsByUserIds(@Param("userIds") List<UUID> userIds);
+
+    @Query(value = """
+            SELECT user_id AS userId,
+                   role_category AS roleCategory,
+                   application_status AS applicationStatus,
+                   interview_date AS interviewDate,
+                   created_at AS createdAt,
+                   updated_at AS updatedAt,
+                   fit_analysis_id AS fitAnalysisId
+            FROM job_applications
+            WHERE user_id IN (:userIds)
+            """, nativeQuery = true)
+    List<PeerEvidenceApplicationRow> findPeerEvidenceApplicationsByUserIds(@Param("userIds") List<UUID> userIds);
+
     List<JobApplication> findByUserIdAndCompanyIgnoreCase(UUID userId, String company);
 
+    @Query("SELECT j FROM JobApplication j WHERE j.userId = :userId AND LOWER(COALESCE(j.companyNameCanonical, j.company)) = LOWER(:company)")
+    List<JobApplication> findByUserIdAndCompanyCanonicalIgnoreCase(@Param("userId") UUID userId, @Param("company") String company);
+
     Optional<JobApplication> findByUserIdAndCompanyIgnoreCaseAndJobTitleIgnoreCase(UUID userId, String company, String jobTitle);
+
+    @Query("SELECT j FROM JobApplication j WHERE j.userId = :userId AND LOWER(COALESCE(j.companyNameCanonical, j.company)) = LOWER(:company) AND LOWER(j.jobTitle) = LOWER(:jobTitle)")
+    Optional<JobApplication> findByUserIdAndCompanyCanonicalIgnoreCaseAndJobTitleIgnoreCase(
+            @Param("userId") UUID userId, @Param("company") String company, @Param("jobTitle") String jobTitle);
+
+    @Query("SELECT j FROM JobApplication j WHERE LOWER(COALESCE(j.companyNameCanonical, j.company)) = LOWER(:company) AND LOWER(j.jobTitle) = LOWER(:jobTitle)")
+    Optional<JobApplication> findByCompanyCanonicalIgnoreCaseAndJobTitleIgnoreCase(
+            @Param("company") String company, @Param("jobTitle") String jobTitle);
+
+    List<JobApplication> findByUserIdAndFitAnalysisId(UUID userId, UUID fitAnalysisId);
 
     List<JobApplication> findByUserIdAndApplicationStatusAndUpdatedAtBefore(UUID userId, String status, LocalDateTime cutoff);
 

@@ -1,6 +1,7 @@
 package com.shivam.jobcopilot.service;
 
 import com.google.api.client.auth.oauth2.Credential;
+import com.google.api.client.auth.oauth2.TokenResponseException;
 import com.google.api.client.googleapis.auth.oauth2.GoogleAuthorizationCodeFlow;
 import com.google.api.client.googleapis.auth.oauth2.GoogleClientSecrets;
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
@@ -10,6 +11,8 @@ import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.gson.GsonFactory;
 import com.shivam.jobcopilot.entity.UserGmailToken;
+import com.shivam.jobcopilot.entity.GmailConnectionStatus;
+import com.shivam.jobcopilot.exception.GmailReauthenticationRequiredException;
 import com.shivam.jobcopilot.repository.UserGmailTokenRepository;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -26,6 +29,7 @@ import java.security.GeneralSecurityException;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
+import java.time.LocalDateTime;
 
 @Service
 public class GmailOAuthService {
@@ -84,10 +88,11 @@ public class GmailOAuthService {
                 .setAccessType("offline")
                 .build();
 
-        return flow.newAuthorizationUrl()
+        var authorizationUrl = flow.newAuthorizationUrl()
                 .setRedirectUri(redirectUri)
-                .setState(userId.toString())
-                .build();
+                .setState(userId.toString());
+        authorizationUrl.set("prompt", "consent");
+        return authorizationUrl.build();
     }
 
     public void handleCallback(String code, String state) throws GeneralSecurityException, IOException {
@@ -107,20 +112,36 @@ public class GmailOAuthService {
                 .orElseGet(UserGmailToken::new);
         token.setUserId(userId);
         token.setAccessToken(encryptionService.encrypt(tokenResponse.getAccessToken()));
-        if (tokenResponse.getRefreshToken() != null) {
+        boolean refreshTokenProvided = tokenResponse.getRefreshToken() != null
+                && !tokenResponse.getRefreshToken().isBlank();
+        if (refreshTokenProvided) {
             token.setRefreshToken(encryptionService.encrypt(tokenResponse.getRefreshToken()));
         }
         token.setExpiresAtEpochMs(tokenResponse.getExpiresInSeconds() != null
                 ? System.currentTimeMillis() + tokenResponse.getExpiresInSeconds() * 1000
                 : null);
+        if (token.getRefreshToken() == null || token.getRefreshToken().isBlank()) {
+            token.setStatus(GmailConnectionStatus.REAUTH_REQUIRED);
+            token.setLastError("Gmail did not provide a refresh token; reconnect with consent");
+            tokenRepository.save(token);
+            log.warn("Gmail OAuth callback completed without a refresh token for user {}", userId);
+            throw new GmailReauthenticationRequiredException("Gmail did not provide a refresh token");
+        }
+        token.setStatus(GmailConnectionStatus.CONNECTED);
+        token.setLastError(null);
         tokenRepository.save(token);
-        log.info("Gmail token saved for user {}", userId);
+        log.info("Gmail token saved for user {} (refresh token provided: {})", userId, refreshTokenProvided);
     }
 
     @SuppressWarnings("deprecation")
     public Credential getCredentialForUser(UUID userId) throws GeneralSecurityException, IOException {
         UserGmailToken token = tokenRepository.findByUserId(userId)
                 .orElseThrow(() -> new RuntimeException("No Gmail token for user: " + userId));
+
+        if (token.getRefreshToken() == null || token.getRefreshToken().isBlank()) {
+            markReauthenticationRequired(userId, "Gmail did not provide a refresh token");
+            throw new GmailReauthenticationRequiredException("Gmail reauthorization is required");
+        }
 
         NetHttpTransport transport = GoogleNetHttpTransport.newTrustedTransport();
 
@@ -138,16 +159,66 @@ public class GmailOAuthService {
 
         // Auto-refresh if expired or expiring soon
         if (credential.getExpiresInSeconds() != null && credential.getExpiresInSeconds() <= 60) {
-            credential.refreshToken();
-            token.setAccessToken(encryptionService.encrypt(credential.getAccessToken()));
-            token.setExpiresAtEpochMs(credential.getExpirationTimeMilliseconds());
-            tokenRepository.save(token);
+            try {
+                boolean refreshed = credential.refreshToken();
+                if (!refreshed || credential.getAccessToken() == null) {
+                    markReauthenticationRequired(userId, "Gmail refresh token was rejected");
+                    throw new GmailReauthenticationRequiredException("Gmail reauthorization is required");
+                }
+                saveRefreshedAccessToken(token, credential);
+            } catch (TokenResponseException e) {
+                if (e.getStatusCode() == 400 || e.getStatusCode() == 401) {
+                    markReauthenticationRequired(userId, "Gmail refresh token is no longer valid");
+                    throw new GmailReauthenticationRequiredException("Gmail reauthorization is required", e);
+                }
+                throw e;
+            }
         }
 
         return credential;
     }
 
     public boolean isConnected(UUID userId) {
-        return tokenRepository.findByUserId(userId).isPresent();
+        return tokenRepository.findByUserId(userId)
+                .map(token -> token.getStatus() == null || token.getStatus() == GmailConnectionStatus.CONNECTED)
+                .orElse(false);
+    }
+
+    public UserGmailToken getToken(UUID userId) {
+        return tokenRepository.findByUserId(userId).orElse(null);
+    }
+
+    public void markPollSuccess(UUID userId, long lastPollEpochSeconds) {
+        tokenRepository.findByUserId(userId).ifPresent(token -> {
+            token.setStatus(GmailConnectionStatus.CONNECTED);
+            token.setLastPollEpochSeconds(lastPollEpochSeconds);
+            token.setLastSuccessfulPollAt(LocalDateTime.now());
+            token.setLastError(null);
+            tokenRepository.save(token);
+        });
+    }
+
+    public void markReauthenticationRequired(UUID userId, String message) {
+        updateConnectionState(userId, GmailConnectionStatus.REAUTH_REQUIRED, message);
+    }
+
+    public void markError(UUID userId, String message) {
+        updateConnectionState(userId, GmailConnectionStatus.ERROR, message);
+    }
+
+    private void updateConnectionState(UUID userId, GmailConnectionStatus status, String message) {
+        tokenRepository.findByUserId(userId).ifPresent(token -> {
+            token.setStatus(status);
+            token.setLastError(message);
+            tokenRepository.save(token);
+        });
+    }
+
+    private void saveRefreshedAccessToken(UserGmailToken token, Credential credential) {
+        token.setAccessToken(encryptionService.encrypt(credential.getAccessToken()));
+        token.setExpiresAtEpochMs(credential.getExpirationTimeMilliseconds());
+        token.setStatus(GmailConnectionStatus.CONNECTED);
+        token.setLastError(null);
+        tokenRepository.save(token);
     }
 }

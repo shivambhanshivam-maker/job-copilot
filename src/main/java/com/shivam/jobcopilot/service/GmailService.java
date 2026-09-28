@@ -11,8 +11,12 @@ import com.google.api.services.gmail.model.Message;
 import com.google.api.services.gmail.model.MessagePart;
 import com.google.api.services.gmail.model.MessagePartHeader;
 import com.shivam.jobcopilot.dto.JobApplicationEmail;
+import com.shivam.jobcopilot.entity.GmailConnectionStatus;
 import com.shivam.jobcopilot.entity.UserGmailToken;
+import com.shivam.jobcopilot.entity.UserGmailProcessedMessage;
+import com.shivam.jobcopilot.exception.GmailReauthenticationRequiredException;
 import com.shivam.jobcopilot.repository.UserGmailTokenRepository;
+import com.shivam.jobcopilot.repository.UserGmailProcessedMessageRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,7 +27,6 @@ import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class GmailService {
@@ -38,19 +41,18 @@ public class GmailService {
     private final JobApplicationService jobApplicationService;
     private final GmailOAuthService gmailOAuthService;
     private final UserGmailTokenRepository tokenRepository;
-
-    // Per-user state
-    private final Map<UUID, Set<String>> processedMessageIds = new ConcurrentHashMap<>();
-    private final Map<UUID, Long> lastPollEpochSeconds = new ConcurrentHashMap<>();
+    private final UserGmailProcessedMessageRepository processedMessageRepository;
 
     public GmailService(EmailClassificationService classificationService,
                         JobApplicationService jobApplicationService,
                         GmailOAuthService gmailOAuthService,
-                        UserGmailTokenRepository tokenRepository) {
+                        UserGmailTokenRepository tokenRepository,
+                        UserGmailProcessedMessageRepository processedMessageRepository) {
         this.classificationService = classificationService;
         this.jobApplicationService = jobApplicationService;
         this.gmailOAuthService = gmailOAuthService;
         this.tokenRepository = tokenRepository;
+        this.processedMessageRepository = processedMessageRepository;
     }
 
     @Scheduled(fixedRateString = "${gmail.poll.interval:60000}")
@@ -61,20 +63,39 @@ public class GmailService {
             return;
         }
         for (UserGmailToken token : tokens) {
-            try {
-                pollForUser(token.getUserId());
-            } catch (com.google.api.client.http.HttpResponseException e) {
-                if (e.getStatusCode() == 401 || e.getStatusCode() == 403) {
-                    log.warn("Auth failure for user {} (HTTP {}), disconnecting Gmail", token.getUserId(), e.getStatusCode());
-                    tokenRepository.deleteByUserId(token.getUserId());
-                    processedMessageIds.remove(token.getUserId());
-                    lastPollEpochSeconds.remove(token.getUserId());
-                } else {
-                    log.error("Error polling Gmail for user {}: {}", token.getUserId(), e.getMessage(), e);
-                }
-            } catch (Exception e) {
-                log.error("Error polling Gmail for user {}: {}", token.getUserId(), e.getMessage(), e);
+            if (token.getStatus() == GmailConnectionStatus.REAUTH_REQUIRED) {
+                log.debug("Skipping Gmail poll for user {} because reauthorization is required", token.getUserId());
+                continue;
             }
+            pollSafely(token);
+        }
+    }
+
+    public void pollNow(UUID userId) {
+        tokenRepository.findByUserId(userId).ifPresentOrElse(
+                this::pollSafely,
+                () -> log.info("No Gmail account connected for user {}, skipping manual sync", userId)
+        );
+    }
+
+    private void pollSafely(UserGmailToken token) {
+        try {
+            pollForUser(token.getUserId());
+        } catch (GmailReauthenticationRequiredException e) {
+            gmailOAuthService.markReauthenticationRequired(token.getUserId(), e.getMessage());
+            log.warn("Gmail reauthorization required for user {}", token.getUserId());
+        } catch (com.google.api.client.http.HttpResponseException e) {
+            if (e.getStatusCode() == 401) {
+                gmailOAuthService.markReauthenticationRequired(token.getUserId(), "Gmail rejected the connection");
+            } else if (e.getStatusCode() == 403) {
+                gmailOAuthService.markError(token.getUserId(), "Gmail denied access to the mailbox");
+            } else {
+                gmailOAuthService.markError(token.getUserId(), "Gmail polling failed");
+            }
+            log.warn("Gmail access failure for user {} (HTTP {})", token.getUserId(), e.getStatusCode());
+        } catch (Exception e) {
+            gmailOAuthService.markError(token.getUserId(), "Gmail polling failed");
+            log.error("Error polling Gmail for user {}: {}", token.getUserId(), e.getMessage(), e);
         }
     }
 
@@ -85,9 +106,12 @@ public class GmailService {
                 .setApplicationName("Job Copilot")
                 .build();
 
-        long lastPoll = lastPollEpochSeconds.getOrDefault(userId, Instant.now().getEpochSecond());
+        UserGmailToken storedToken = tokenRepository.findByUserId(userId)
+                .orElseThrow(() -> new IllegalStateException("No Gmail token for user: " + userId));
+        long lastPoll = storedToken.getLastPollEpochSeconds() != null
+                ? storedToken.getLastPollEpochSeconds()
+                : Instant.now().getEpochSecond();
         long pollStart = Instant.now().getEpochSecond();
-        Set<String> processed = processedMessageIds.computeIfAbsent(userId, k -> Collections.synchronizedSet(new HashSet<>()));
 
         String query = "after:" + lastPoll;
         ListMessagesResponse response = gmailClient.users().messages()
@@ -96,12 +120,12 @@ public class GmailService {
         List<Message> messages = response.getMessages();
         if (messages == null || messages.isEmpty()) {
             log.info("No new messages for user {} since last poll", userId);
-            lastPollEpochSeconds.put(userId, pollStart);
+            gmailOAuthService.markPollSuccess(userId, pollStart);
             return;
         }
 
         for (Message msgRef : messages) {
-            if (processed.contains(msgRef.getId())) continue;
+            if (processedMessageRepository.existsByUserIdAndGmailMessageId(userId, msgRef.getId())) continue;
 
             Message fullMessage = gmailClient.users().messages()
                     .get("me", msgRef.getId()).setFormat("full").execute();
@@ -113,7 +137,7 @@ public class GmailService {
             log.info("Processing email for user {}: '{}' from {}", userId, subject, from);
 
             JobApplicationEmail result = classificationService.classify(subject, body, from, msgRef.getId());
-            processed.add(msgRef.getId());
+            processedMessageRepository.save(new UserGmailProcessedMessage(userId, msgRef.getId()));
 
             if (result != null) {
                 jobApplicationService.upsert(result, userId);
@@ -123,7 +147,7 @@ public class GmailService {
                 log.info("Email not job-related for user {}, skipping: '{}'", userId, subject);
             }
         }
-        lastPollEpochSeconds.put(userId, pollStart);
+        gmailOAuthService.markPollSuccess(userId, pollStart);
     }
 
     private String getHeader(Message message, String headerName) {

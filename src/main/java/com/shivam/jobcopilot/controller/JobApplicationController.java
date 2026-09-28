@@ -17,6 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
@@ -52,6 +53,41 @@ public class JobApplicationController {
         return jobApplicationService.listAll(currentUserId(auth));
     }
 
+    @GetMapping("/email-reviews")
+    public List<com.shivam.jobcopilot.dto.EmailReviewResponse> getEmailReviews(Authentication auth) {
+        return jobApplicationService.getEmailReviews(currentUserId(auth));
+    }
+
+    public record EmailReviewResolutionRequest(UUID applicationId) {}
+
+    @PostMapping("/email-reviews/{reviewId}/resolve")
+    public JobApplication resolveEmailReview(@PathVariable UUID reviewId,
+                                             @RequestBody EmailReviewResolutionRequest request,
+                                             Authentication auth) {
+        if (request == null || request.applicationId() == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "An application must be selected");
+        }
+        try {
+            return jobApplicationService.resolveEmailReview(reviewId, request.applicationId(), currentUserId(auth));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (SecurityException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        }
+    }
+
+    @PostMapping("/email-reviews/{reviewId}/ignore")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void ignoreEmailReview(@PathVariable UUID reviewId, Authentication auth) {
+        try {
+            jobApplicationService.ignoreEmailReview(reviewId, currentUserId(auth));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (SecurityException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        }
+    }
+
     @GetMapping("/{id}")
     public JobApplication getById(@PathVariable UUID id) {
         return jobApplicationService.getById(id);
@@ -59,12 +95,45 @@ public class JobApplicationController {
 
     @PostMapping
     public JobApplication create(@RequestBody JobApplication app, Authentication auth) {
-        return jobApplicationService.create(app, currentUserId(auth));
+        try {
+            return jobApplicationService.create(app, currentUserId(auth));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
+    @PostMapping("/{id}/fit-analysis/retry")
+    public JobApplication retryFitAnalysis(@PathVariable UUID id, Authentication auth) {
+        try {
+            return jobApplicationService.retryFitAnalysis(id, currentUserId(auth));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        } catch (SecurityException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        }
+    }
+
+    @PostMapping("/from-fit-analysis/{fitAnalysisId}")
+    public JobApplication markAsApplied(@PathVariable UUID fitAnalysisId,
+                                        @RequestBody(required = false) Map<String, String> request,
+                                        Authentication auth) {
+        try {
+            String roleCategory = request == null ? null : request.get("roleCategory");
+            return jobApplicationService.markAsApplied(fitAnalysisId, currentUserId(auth), roleCategory);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (SecurityException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        }
     }
 
     @PutMapping("/{id}")
     public JobApplication update(@PathVariable UUID id, @RequestBody JobApplication app, Authentication auth) {
-        return jobApplicationService.update(id, app, currentUserId(auth));
+        try {
+            return jobApplicationService.update(id, app, currentUserId(auth));
+        } catch (SecurityException e) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN, e.getMessage());
+        }
     }
 
     @PostMapping("/{id}/snooze")

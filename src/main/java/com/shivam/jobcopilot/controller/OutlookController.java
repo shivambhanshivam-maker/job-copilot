@@ -1,7 +1,11 @@
 package com.shivam.jobcopilot.controller;
 
 import com.shivam.jobcopilot.repository.UserOutlookTokenRepository;
+import com.shivam.jobcopilot.dto.OutlookConnectionStatusResponse;
+import com.shivam.jobcopilot.entity.OutlookConnectionStatus;
+import com.shivam.jobcopilot.entity.UserOutlookToken;
 import com.shivam.jobcopilot.service.OutlookOAuthService;
+import com.shivam.jobcopilot.service.OutlookService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -20,11 +24,14 @@ public class OutlookController {
     private String frontendUrl;
 
     private final OutlookOAuthService outlookOAuthService;
+    private final OutlookService outlookService;
     private final UserOutlookTokenRepository outlookTokenRepository;
 
     public OutlookController(OutlookOAuthService outlookOAuthService,
+                             OutlookService outlookService,
                              UserOutlookTokenRepository outlookTokenRepository) {
         this.outlookOAuthService = outlookOAuthService;
+        this.outlookService = outlookService;
         this.outlookTokenRepository = outlookTokenRepository;
     }
 
@@ -49,9 +56,28 @@ public class OutlookController {
     }
 
     @GetMapping("/status")
-    public Map<String, Boolean> status(Authentication auth) {
+    public OutlookConnectionStatusResponse status(Authentication auth) {
         UUID userId = (UUID) auth.getPrincipal();
-        return Map.of("connected", outlookOAuthService.isConnected(userId));
+        UserOutlookToken token = outlookOAuthService.getToken(userId);
+        if (token == null) {
+            return new OutlookConnectionStatusResponse(false, "DISCONNECTED", null, null);
+        }
+        OutlookConnectionStatus status = token.getStatus() == null
+                ? OutlookConnectionStatus.CONNECTED
+                : token.getStatus();
+        return new OutlookConnectionStatusResponse(
+                status == OutlookConnectionStatus.CONNECTED,
+                status.name(),
+                token.getLastError(),
+                token.getLastSuccessfulPollAt()
+        );
+    }
+
+    @PostMapping("/sync")
+    public OutlookConnectionStatusResponse sync(Authentication auth) {
+        UUID userId = (UUID) auth.getPrincipal();
+        outlookService.pollNow(userId);
+        return status(auth);
     }
 
     @PostMapping("/disconnect")

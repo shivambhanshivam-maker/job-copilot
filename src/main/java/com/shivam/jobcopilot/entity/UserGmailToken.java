@@ -29,6 +29,17 @@ public class UserGmailToken {
 
     private LocalDateTime connectedAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column
+    private GmailConnectionStatus status = GmailConnectionStatus.CONNECTED;
+
+    private Long lastPollEpochSeconds;
+
+    private LocalDateTime lastSuccessfulPollAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String lastError;
+
     public UserGmailToken() {}
 
     @PrePersist
@@ -56,4 +67,16 @@ public class UserGmailToken {
 
     public LocalDateTime getConnectedAt() { return connectedAt; }
     public void setConnectedAt(LocalDateTime connectedAt) { this.connectedAt = connectedAt; }
+
+    public GmailConnectionStatus getStatus() { return status; }
+    public void setStatus(GmailConnectionStatus status) { this.status = status; }
+
+    public Long getLastPollEpochSeconds() { return lastPollEpochSeconds; }
+    public void setLastPollEpochSeconds(Long lastPollEpochSeconds) { this.lastPollEpochSeconds = lastPollEpochSeconds; }
+
+    public LocalDateTime getLastSuccessfulPollAt() { return lastSuccessfulPollAt; }
+    public void setLastSuccessfulPollAt(LocalDateTime lastSuccessfulPollAt) { this.lastSuccessfulPollAt = lastSuccessfulPollAt; }
+
+    public String getLastError() { return lastError; }
+    public void setLastError(String lastError) { this.lastError = lastError; }
 }

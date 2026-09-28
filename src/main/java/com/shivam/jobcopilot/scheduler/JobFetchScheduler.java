@@ -117,7 +117,7 @@ public class JobFetchScheduler {
             String rawJson = aiService.analyze(cv.getContentText(), jobContent,
                     listing.getEmployerName(), listing.getJobTitle());
             return fitAnalysisService.persistFromJson(rawJson, jobContent, cv.getId(),
-                    listing.getEmployerName(), listing.getJobTitle());
+                    listing.getEmployerName(), listing.getJobTitle(), null, null, cv.getContentText());
         } catch (Exception e) {
             log.error("Fit analysis failed for listing {} ({})", listing.getJobTitle(), listing.getExternalId(), e);
             return Optional.empty();

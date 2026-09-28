@@ -1,5 +1,6 @@
 package com.shivam.jobcopilot.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shivam.jobcopilot.dto.AdjustmentStateRequest;
 import com.shivam.jobcopilot.entity.CV;
 import com.shivam.jobcopilot.entity.CvAdjustmentItem;
@@ -8,17 +9,24 @@ import com.shivam.jobcopilot.entity.GapItem;
 import com.shivam.jobcopilot.service.AIService;
 import com.shivam.jobcopilot.service.CVService;
 import com.shivam.jobcopilot.service.FitAnalysisService;
+import com.shivam.jobcopilot.service.FitAnalysisItemStreamParser;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 import reactor.core.publisher.Flux;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 @RestController
@@ -27,6 +35,7 @@ public class FitAnalysisController {
     private final CVService cvService;
     private final AIService aiService;
     private final FitAnalysisService fitAnalysisService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public FitAnalysisController(CVService cvService, AIService aiService, FitAnalysisService fitAnalysisService) {
         this.cvService = cvService;
@@ -48,36 +57,74 @@ public class FitAnalysisController {
     }
 
     @PostMapping(value = "/match/analyze", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> analyze(@RequestBody Map<String, String> request, Authentication auth) {
+    public Flux<ServerSentEvent<String>> analyze(@RequestBody Map<String, String> request, Authentication auth) {
         UUID userId = currentUserId(auth);
         UUID cvId = UUID.fromString(request.get("cvId"));
         String jobDescription = request.get("jobDescription");
         String companyName = request.get("companyName");
         String roleTitle = request.get("jobTitle");
+        String roleCategory = request.get("roleCategory");
 
         CV cv = cvService.getById(cvId);
 
+        Optional<FitAnalysis> reusable = fitAnalysisService.findReusableAnalysis(
+                userId, cvId, cv.getContentText(), companyName, roleTitle, roleCategory, jobDescription);
+        if (reusable.isPresent()) {
+            return Flux.just(toSse("[SAVED:" + reusable.get().getId() + "]"));
+        }
+
         StringBuilder buffer = new StringBuilder();
 
-        return aiService.analyzeStream(cv.getContentText(), jobDescription, companyName, roleTitle)
-                .doOnNext(buffer::append)
-                .concatWith(Flux.defer(() ->
-                        fitAnalysisService.persistFromJson(buffer.toString(), jobDescription, cvId, companyName, roleTitle, userId)
-                                .map(fa -> Flux.just("\n[SAVED:" + fa.getId() + "]"))
-                                .orElse(Flux.empty())
-                ));
+        return streamWithUiEvents(
+                aiService.analyzeStream(cv.getContentText(), jobDescription, companyName, roleTitle),
+                cv.getContentText(),
+                buffer,
+                () -> fitAnalysisService.persistFromJson(buffer.toString(), jobDescription, cvId, companyName,
+                        roleTitle, roleCategory, userId, cv.getContentText())
+        );
     }
 
     @PostMapping(value = "/fit-analyses/{id}/reanalyze", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> reAnalyze(@PathVariable UUID id,
-                                  @RequestBody(required = false) AdjustmentStateRequest request,
-                                  Authentication auth) {
+    public Flux<ServerSentEvent<String>> reAnalyze(@PathVariable UUID id,
+                                                   @RequestBody(required = false) AdjustmentStateRequest request,
+                                                   Authentication auth) {
         FitAnalysis existing = fitAnalysisService.getById(id);
-        CV cv = cvService.getById(existing.getCvId());
+        UUID userId = currentUserId(auth);
+        if (existing.getUserId() == null || !userId.equals(existing.getUserId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+
+        UUID cvId = existing.getCvId();
+        if (request != null && present(request.getCvId())) {
+            try {
+                cvId = UUID.fromString(request.getCvId().trim());
+            } catch (IllegalArgumentException e) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid CV id");
+            }
+        }
+        if (cvId == null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "No CV is linked to this analysis");
+        }
+        CV cv = cvService.getById(cvId);
+        if (cv.getUserId() == null || !userId.equals(cv.getUserId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+        if (cv.getUserId() == null || !userId.equals(cv.getUserId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
 
         List<AdjustmentStateRequest.StateUpdate> states = (request != null && request.getStates() != null)
                 ? request.getStates()
                 : List.of();
+
+        String jobDescription = valueOr(request == null ? null : request.getJobDescription(), existing.getJobDescriptionText());
+        String companyName = valueOr(request == null ? null : request.getCompanyName(), existing.getCompany());
+        String roleTitle = valueOr(request == null ? null : request.getJobTitle(), existing.getJobTitle());
+        String roleCategory = valueOr(request == null ? null : request.getRoleCategory(), existing.getRoleCategory());
+
+        if (!present(jobDescription) || !present(companyName) || !present(roleTitle)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Company, role title, and job description are required");
+        }
 
         // Redaction of dismissed cvPoints from CV text — disabled for now, enable if prompt-based suppression proves unreliable
         // String cvText = cv.getContentText();
@@ -88,23 +135,99 @@ public class FitAnalysisController {
         // }
         String cvText = cv.getContentText();
 
-        String previousContext = buildPreviousContext(existing, states);
+        boolean preserveRubric = fitAnalysisService.usesCurrentScoring(existing)
+                && existing.getJdRequirements() != null
+                && !existing.getJdRequirements().isEmpty()
+                && Objects.equals(existing.getJdContentHash(),
+                fitAnalysisService.analysisContextHash(companyName, roleTitle, roleCategory, jobDescription));
+        String previousContext = preserveRubric ? buildPreviousContext(existing, states) : "";
         StringBuilder buffer = new StringBuilder();
 
-        return aiService.reAnalyzeStream(cvText, existing.getJobDescriptionText(),
-                        existing.getCompany(), existing.getJobTitle(), previousContext)
+        Flux<String> analysisStream = preserveRubric
+                ? aiService.reAnalyzeStream(cvText, jobDescription, companyName, roleTitle, previousContext)
+                : aiService.analyzeStream(cvText, jobDescription, companyName, roleTitle);
+        final UUID analysisCvId = cvId;
+
+        return streamWithUiEvents(
+                analysisStream,
+                cvText,
+                buffer,
+                () -> fitAnalysisService.createRevisionFromJson(
+                        buffer.toString(), existing, analysisCvId, cvText, companyName, roleTitle,
+                        roleCategory, jobDescription, preserveRubric, userId)
+        );
+    }
+
+    private Flux<ServerSentEvent<String>> streamWithUiEvents(Flux<String> analysisStream,
+                                                             String cvText,
+                                                             StringBuilder buffer,
+                                                             Supplier<Optional<com.shivam.jobcopilot.entity.FitAnalysis>> persist) {
+        FitAnalysisItemStreamParser parser = new FitAnalysisItemStreamParser(objectMapper, fitAnalysisService, cvText);
+        AtomicBoolean failed = new AtomicBoolean(false);
+        Flux<ServerSentEvent<String>> uiStream = analysisStream
                 .doOnNext(buffer::append)
-                .doOnComplete(() -> fitAnalysisService.replaceFromJson(
-                        buffer.toString(), id, existing.getCvId(), currentUserId(auth)
-                ));
+                .flatMapIterable(parser::accept)
+                .map(this::serializeEvent)
+                .map(this::toSse)
+                .doOnError(error -> failed.set(true))
+                .onErrorResume(error -> Flux.just(toSse(serializeError(
+                        "The fit analysis could not be completed. Please try again."))));
+        return Flux.concat(
+                Flux.just(toSse(serializeProgress("Reading role requirements"))),
+                uiStream,
+                Flux.defer(() -> failed.get()
+                        ? Flux.empty()
+                        : Flux.just(toSse(serializeProgress("Finalizing analysis")))),
+                Flux.defer(() -> failed.get() ? Flux.empty() : persist.get()
+                        .map(fa -> Flux.just(toSse("[SAVED:" + fa.getId() + "]")))
+                        .orElse(Flux.empty()))
+        );
+    }
+
+    private ServerSentEvent<String> toSse(String data) {
+        return ServerSentEvent.<String>builder()
+                .data(data)
+                .build();
+    }
+
+    private String serializeProgress(String stage) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "type", "progress",
+                    "stage", stage
+            ));
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not serialize fit-analysis progress", e);
+        }
+    }
+
+    private String serializeError(String message) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "type", "error",
+                    "message", message
+            ));
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not serialize fit-analysis error", e);
+        }
+    }
+
+    private String serializeEvent(FitAnalysisItemStreamParser.StreamEvent event) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("type", event.type());
+            payload.putAll(event.data());
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            throw new IllegalStateException("Could not serialize fit-analysis stream event", e);
+        }
     }
 
     private String buildPreviousContext(FitAnalysis fa, List<AdjustmentStateRequest.StateUpdate> states) {
         StringBuilder sb = new StringBuilder();
         sb.append("--- Re-Analysis Context ---\n");
-        sb.append("Previous fit score: ").append(fa.getFitScore()).append("\n");
-        sb.append("Treat this as a baseline. Do not score lower unless the CV has genuinely worsened. ");
-        sb.append("Evaluate the updated CV holistically — credit all improvements whether or not they appear in the previous adjustments list.\n\n");
+        sb.append(fitAnalysisService.fixedRubricContext(fa));
+        sb.append("Evaluate the complete updated CV against every fixed criterion. Credit improvements and reflect genuine deterioration. Do not infer evidence from the previous result.\n\n");
 
         if (fa.getGaps() != null && !fa.getGaps().isEmpty()) {
             sb.append("Previous gaps:\n");
@@ -169,5 +292,13 @@ public class FitAnalysisController {
 
         sb.append("---\n\n");
         return sb.toString();
+    }
+
+    private String valueOr(String value, String fallback) {
+        return present(value) ? value.trim() : fallback;
+    }
+
+    private boolean present(String value) {
+        return value != null && !value.isBlank();
     }
 }

@@ -1,7 +1,11 @@
 package com.shivam.jobcopilot.controller;
 
 import com.shivam.jobcopilot.repository.UserGmailTokenRepository;
+import com.shivam.jobcopilot.dto.GmailConnectionStatusResponse;
+import com.shivam.jobcopilot.entity.GmailConnectionStatus;
+import com.shivam.jobcopilot.entity.UserGmailToken;
 import com.shivam.jobcopilot.service.GmailOAuthService;
+import com.shivam.jobcopilot.service.GmailService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -20,11 +24,14 @@ public class GmailController {
     private String frontendUrl;
 
     private final GmailOAuthService gmailOAuthService;
+    private final GmailService gmailService;
     private final UserGmailTokenRepository gmailTokenRepository;
 
     public GmailController(GmailOAuthService gmailOAuthService,
+                           GmailService gmailService,
                            UserGmailTokenRepository gmailTokenRepository) {
         this.gmailOAuthService = gmailOAuthService;
+        this.gmailService = gmailService;
         this.gmailTokenRepository = gmailTokenRepository;
     }
 
@@ -49,9 +56,28 @@ public class GmailController {
     }
 
     @GetMapping("/status")
-    public Map<String, Boolean> status(Authentication auth) {
+    public GmailConnectionStatusResponse status(Authentication auth) {
         UUID userId = (UUID) auth.getPrincipal();
-        return Map.of("connected", gmailOAuthService.isConnected(userId));
+        UserGmailToken token = gmailOAuthService.getToken(userId);
+        if (token == null) {
+            return new GmailConnectionStatusResponse(false, "DISCONNECTED", null, null);
+        }
+        GmailConnectionStatus status = token.getStatus() == null
+                ? GmailConnectionStatus.CONNECTED
+                : token.getStatus();
+        return new GmailConnectionStatusResponse(
+                status == GmailConnectionStatus.CONNECTED,
+                status.name(),
+                token.getLastError(),
+                token.getLastSuccessfulPollAt()
+        );
+    }
+
+    @PostMapping("/sync")
+    public GmailConnectionStatusResponse sync(Authentication auth) {
+        UUID userId = (UUID) auth.getPrincipal();
+        gmailService.pollNow(userId);
+        return status(auth);
     }
 
     @PostMapping("/disconnect")

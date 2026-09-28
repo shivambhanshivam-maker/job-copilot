@@ -32,6 +32,16 @@ public class UserOutlookToken {
 
     private LocalDateTime connectedAt;
 
+    @Enumerated(EnumType.STRING)
+    private OutlookConnectionStatus status = OutlookConnectionStatus.CONNECTED;
+
+    private Long lastPollEpochSeconds;
+
+    private LocalDateTime lastSuccessfulPollAt;
+
+    @Column(columnDefinition = "TEXT")
+    private String lastError;
+
     public UserOutlookToken() {}
 
     @PrePersist
@@ -59,4 +69,16 @@ public class UserOutlookToken {
 
     public LocalDateTime getConnectedAt() { return connectedAt; }
     public void setConnectedAt(LocalDateTime connectedAt) { this.connectedAt = connectedAt; }
+
+    public OutlookConnectionStatus getStatus() { return status; }
+    public void setStatus(OutlookConnectionStatus status) { this.status = status; }
+
+    public Long getLastPollEpochSeconds() { return lastPollEpochSeconds; }
+    public void setLastPollEpochSeconds(Long lastPollEpochSeconds) { this.lastPollEpochSeconds = lastPollEpochSeconds; }
+
+    public LocalDateTime getLastSuccessfulPollAt() { return lastSuccessfulPollAt; }
+    public void setLastSuccessfulPollAt(LocalDateTime lastSuccessfulPollAt) { this.lastSuccessfulPollAt = lastSuccessfulPollAt; }
+
+    public String getLastError() { return lastError; }
+    public void setLastError(String lastError) { this.lastError = lastError; }
 }

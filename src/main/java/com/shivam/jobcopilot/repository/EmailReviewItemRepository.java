@@ -1,0 +1,17 @@
+package com.shivam.jobcopilot.repository;
+
+import com.shivam.jobcopilot.entity.EmailReviewItem;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
+
+@Repository
+public interface EmailReviewItemRepository extends JpaRepository<EmailReviewItem, UUID> {
+
+    List<EmailReviewItem> findByUserIdAndReviewStatusOrderByCreatedAtDesc(UUID userId, String reviewStatus);
+
+    Optional<EmailReviewItem> findByUserIdAndSourceMessageId(UUID userId, String sourceMessageId);
+}

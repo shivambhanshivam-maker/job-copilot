@@ -2,4 +2,4 @@ package com.shivam.jobcopilot.dto;
 
 import java.util.UUID;
 
-public record AuthResponse(String token, UUID userId, String email, String name) {}
+public record AuthResponse(String token, UUID userId, String email, String name, boolean advisorAccess, String accountMode) {}

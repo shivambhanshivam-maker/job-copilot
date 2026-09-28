@@ -18,7 +18,7 @@ An AI-powered job search management platform that tracks applications, analyzes 
 |---|---|
 | Language | Java 21 |
 | Framework | Spring Boot 3.4.2 |
-| AI | Spring AI 1.0.0 + OpenAI `gpt-5.2` |
+| AI | Spring AI 1.0.0 + OpenAI `gpt-5.6-luna` |
 | Database | PostgreSQL (Neon serverless) / H2 for local dev |
 | Auth | JWT (JJWT 0.12.6) + AES-256-GCM token encryption |
 | Email | Gmail API (Google OAuth2) + Microsoft Graph API (MSAL4J) |
@@ -48,7 +48,7 @@ spring.datasource.password=<password>
 
 # OpenAI
 spring.ai.openai.api-key=sk-proj-...
-spring.ai.openai.chat.options.model=gpt-5.2
+spring.ai.openai.chat.options.model=gpt-5.6-luna
 
 # JWT
 jwt.secret=<min-32-char-secret>

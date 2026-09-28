@@ -1,6 +1,7 @@
 package com.shivam.jobcopilot.service;
 
 import com.microsoft.aad.msal4j.*;
+import com.shivam.jobcopilot.entity.OutlookConnectionStatus;
 import com.shivam.jobcopilot.entity.UserOutlookToken;
 import com.shivam.jobcopilot.repository.UserOutlookTokenRepository;
 import org.slf4j.Logger;
@@ -12,6 +13,7 @@ import java.net.URI;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.time.LocalDateTime;
 
 @Service
 public class OutlookOAuthService {
@@ -70,6 +72,8 @@ public class OutlookOAuthService {
         token.setCachedAccessToken(encryptionService.encrypt(result.accessToken()));
         token.setExpiresAtEpochMs(result.expiresOnDate().getTime());
         token.setOutlookAddress(result.account().username());
+        token.setStatus(OutlookConnectionStatus.CONNECTED);
+        token.setLastError(null);
         tokenRepository.save(token);
         log.info("Outlook token saved for user {} ({})", userId, result.account().username());
     }
@@ -99,6 +103,8 @@ public class OutlookOAuthService {
         stored.setTokenCacheData(encryptionService.encrypt(cacheAspect.getCacheData()));
         stored.setCachedAccessToken(encryptionService.encrypt(result.accessToken()));
         stored.setExpiresAtEpochMs(result.expiresOnDate().getTime());
+        stored.setStatus(OutlookConnectionStatus.CONNECTED);
+        stored.setLastError(null);
         tokenRepository.save(stored);
         log.info("Outlook token refreshed and saved for user {}", userId);
 
@@ -106,7 +112,39 @@ public class OutlookOAuthService {
     }
 
     public boolean isConnected(UUID userId) {
-        return tokenRepository.findByUserId(userId).isPresent();
+        return tokenRepository.findByUserId(userId)
+                .map(token -> token.getStatus() == null || token.getStatus() == OutlookConnectionStatus.CONNECTED)
+                .orElse(false);
+    }
+
+    public UserOutlookToken getToken(UUID userId) {
+        return tokenRepository.findByUserId(userId).orElse(null);
+    }
+
+    public void markPollSuccess(UUID userId, long lastPollEpochSeconds) {
+        tokenRepository.findByUserId(userId).ifPresent(token -> {
+            token.setStatus(OutlookConnectionStatus.CONNECTED);
+            token.setLastPollEpochSeconds(lastPollEpochSeconds);
+            token.setLastSuccessfulPollAt(LocalDateTime.now());
+            token.setLastError(null);
+            tokenRepository.save(token);
+        });
+    }
+
+    public void markReauthenticationRequired(UUID userId, String message) {
+        updateConnectionState(userId, OutlookConnectionStatus.REAUTH_REQUIRED, message);
+    }
+
+    public void markError(UUID userId, String message) {
+        updateConnectionState(userId, OutlookConnectionStatus.ERROR, message);
+    }
+
+    private void updateConnectionState(UUID userId, OutlookConnectionStatus status, String message) {
+        tokenRepository.findByUserId(userId).ifPresent(token -> {
+            token.setStatus(status);
+            token.setLastError(message);
+            tokenRepository.save(token);
+        });
     }
 
     private IConfidentialClientApplication buildMsalApp(TokenCacheAspect cacheAspect) throws Exception {

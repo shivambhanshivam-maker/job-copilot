@@ -18,7 +18,15 @@ public class FitAnalysis {
     private UUID id;
 
     private String company;
+
+    @Column(name = "company_name_raw")
+    private String companyNameRaw;
+
+    @Column(name = "company_name_canonical")
+    private String companyNameCanonical;
     private String jobTitle;
+
+    private String roleCategory;
 
     @Column(columnDefinition = "TEXT")
     private String jobDescriptionText;
@@ -58,6 +66,14 @@ public class FitAnalysis {
     @CollectionTable(name = "fit_analysis_gaps", joinColumns = @JoinColumn(name = "fit_analysis_id"))
     private List<GapItem> gaps = new ArrayList<>();
 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "fit_analysis_requirements", joinColumns = @JoinColumn(name = "fit_analysis_id"))
+    private List<FitRequirement> jdRequirements = new ArrayList<>();
+
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(name = "fit_analysis_requirement_evidence", joinColumns = @JoinColumn(name = "fit_analysis_id"))
+    private List<RequirementEvidence> requirementEvidence = new ArrayList<>();
+
     @Column(columnDefinition = "TEXT")
     private String positioningAngle;
 
@@ -69,20 +85,83 @@ public class FitAnalysis {
 
     private UUID userId;
 
+    @Column(name = "previous_analysis_id")
+    private UUID previousAnalysisId;
+
+    @Column(name = "revision_number")
+    private Integer revisionNumber;
+
+    @Column(name = "cv_content_hash", length = 64)
+    private String cvContentHash;
+
+    @Column(name = "cv_text_snapshot", columnDefinition = "TEXT")
+    private String cvTextSnapshot;
+
+    @Column(name = "jd_content_hash", length = 64)
+    private String jdContentHash;
+
+    @Column(name = "scoring_version", length = 64)
+    private String scoringVersion;
+
+
     public FitAnalysis() {}
 
     @PrePersist
     protected void onCreate() {
+        synchronizeCompanyNames();
         this.analyzedAt = LocalDateTime.now();
+        if (this.revisionNumber == null) this.revisionNumber = 1;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        synchronizeCompanyNames();
+    }
+
+    @PostLoad
+    protected void onLoad() {
+        synchronizeCompanyNames();
+    }
+
+    private void synchronizeCompanyNames() {
+        if (!present(companyNameRaw)) companyNameRaw = company;
+        if (!present(companyNameCanonical)) companyNameCanonical = companyNameRaw;
+        if (!present(company)) company = present(companyNameCanonical) ? companyNameCanonical : companyNameRaw;
+    }
+
+    private boolean present(String value) {
+        return value != null && !value.isBlank();
     }
 
     public UUID getId() { return id; }
 
-    public String getCompany() { return company; }
-    public void setCompany(String company) { this.company = company; }
+    public String getCompany() {
+        return present(companyNameRaw) ? companyNameRaw
+                : present(company) ? company : companyNameCanonical;
+    }
+
+    public void setCompany(String company) {
+        this.company = company;
+        this.companyNameRaw = company;
+        this.companyNameCanonical = company;
+    }
+
+    public String getCompanyNameRaw() { return companyNameRaw != null ? companyNameRaw : company; }
+    public void setCompanyNameRaw(String companyNameRaw) { this.companyNameRaw = companyNameRaw; }
+
+    public String getCompanyNameCanonical() {
+        return companyNameCanonical != null ? companyNameCanonical : getCompany();
+    }
+
+    public void setCompanyNameCanonical(String companyNameCanonical) {
+        this.companyNameCanonical = companyNameCanonical;
+    }
 
     public String getJobTitle() { return jobTitle; }
     public void setJobTitle(String jobTitle) { this.jobTitle = jobTitle; }
+
+    public String getRoleCategory() { return roleCategory; }
+    public void setRoleCategory(String roleCategory) { this.roleCategory = roleCategory; }
 
     public String getJobDescriptionText() { return jobDescriptionText; }
     public void setJobDescriptionText(String jobDescriptionText) { this.jobDescriptionText = jobDescriptionText; }
@@ -141,6 +220,12 @@ public class FitAnalysis {
     public List<GapItem> getGaps() { return gaps; }
     public void setGaps(List<GapItem> gaps) { this.gaps = gaps; }
 
+    public List<FitRequirement> getJdRequirements() { return jdRequirements; }
+    public void setJdRequirements(List<FitRequirement> jdRequirements) { this.jdRequirements = jdRequirements; }
+
+    public List<RequirementEvidence> getRequirementEvidence() { return requirementEvidence; }
+    public void setRequirementEvidence(List<RequirementEvidence> requirementEvidence) { this.requirementEvidence = requirementEvidence; }
+
     public String getPositioningAngle() { return positioningAngle; }
     public void setPositioningAngle(String positioningAngle) { this.positioningAngle = positioningAngle; }
 
@@ -151,4 +236,23 @@ public class FitAnalysis {
 
     public UUID getUserId() { return userId; }
     public void setUserId(UUID userId) { this.userId = userId; }
+
+    public UUID getPreviousAnalysisId() { return previousAnalysisId; }
+    public void setPreviousAnalysisId(UUID previousAnalysisId) { this.previousAnalysisId = previousAnalysisId; }
+
+    public Integer getRevisionNumber() { return revisionNumber; }
+    public void setRevisionNumber(Integer revisionNumber) { this.revisionNumber = revisionNumber; }
+
+    public String getCvContentHash() { return cvContentHash; }
+    public void setCvContentHash(String cvContentHash) { this.cvContentHash = cvContentHash; }
+
+    public String getCvTextSnapshot() { return cvTextSnapshot; }
+    public void setCvTextSnapshot(String cvTextSnapshot) { this.cvTextSnapshot = cvTextSnapshot; }
+
+    public String getJdContentHash() { return jdContentHash; }
+    public void setJdContentHash(String jdContentHash) { this.jdContentHash = jdContentHash; }
+
+    public String getScoringVersion() { return scoringVersion; }
+    public void setScoringVersion(String scoringVersion) { this.scoringVersion = scoringVersion; }
+
 }

@@ -34,6 +34,7 @@ bin/
 application-local.properties
 credentials.json
 tokens/
+.claude/settings.local.json
 
 ### Build output ###
 target/

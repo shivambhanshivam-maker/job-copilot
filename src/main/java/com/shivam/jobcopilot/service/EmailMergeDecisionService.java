@@ -40,14 +40,24 @@ public class EmailMergeDecisionService {
                         - UPDATE: the email is an update to one of the existing applications. Specify which one via applicationId.
                         - CREATE: this email represents a brand-new application not yet tracked.
                         - IGNORE: the email is clearly already reflected in the existing data (true duplicate).
+                        - UNRESOLVED: the email is meaningful but no candidate is clearly better than the others.
 
                         Matching rules (apply in order):
                         1. If the email contains a job title that matches an existing application's title — prefer that application.
                         2. If the email status is terminal or advancing (Rejected, Offer, Closed), only consider \
                         applications in active stages (Applied, Interview, Referral Received). \
                         Do not match a rejection to an already-closed or already-rejected application.
-                        3. If still ambiguous, prefer the application most recently updated.
-                        4. If no existing application is a reasonable match, use CREATE.
+                        3. Infer what happened from the email language and compare it with each application's current stage and recent history. \
+                        For example, "thank you for interviewing" and "invited to the next interview" are more consistent with \
+                        an application already at Interview stage than one still at Applied stage. Do not treat a missing role title \
+                        as ambiguous by itself.
+                        4. Use matching recruiter, email thread, interview date, and other role context when available.
+                        5. If candidates are otherwise similarly plausible, use a meaningful recency difference as a tie-breaker. \
+                        Prefer recent meaningful application activity over a much older inactive application, but never let recency \
+                        override stronger stage, recruiter, thread, date, or role evidence.
+                        6. Return UNRESOLVED only when no candidate is clearly better than the others. Do not use UNRESOLVED merely \
+                        because the role title is missing. If existing candidates are plausible, do not use CREATE unless the email \
+                        clearly represents a distinct new role.
 
                         Fit analysis linking rules:
                         - Review the fit analyses list and check if any refers to the same role as this email. \
@@ -68,12 +78,12 @@ public class EmailMergeDecisionService {
                         Example: put "interviewDate" here when the new status is Offer, Rejected, or Closed, \
                         because the interview is over and the stored date is now stale and misleading. \
                         Do NOT put a field here just because the email didn't mention it.
-                        - Never clear "company" or "jobTitle".
-                        - Valid field names: company, jobTitle, recruiterName, recruiterEmail, applicationStatus, \
+                        - Never clear company identity or "jobTitle".
+                        - Valid field names: recruiterName, recruiterEmail, applicationStatus, \
                         referral, roleCategory, interviewDate.
 
                         Respond with ONLY a valid JSON object — no markdown, no extra text:
-                        {"action": "UPDATE|CREATE|IGNORE", "applicationId": "existing UUID or null", \
+                        {"action": "UPDATE|CREATE|IGNORE|UNRESOLVED", "applicationId": "existing UUID or null", \
                         "fitAnalysisId": "matching fit analysis UUID or null", \
                         "fieldsToSet": {"fieldName": "value"}, "fieldsToClear": ["fieldName"], \
                         "reasoning": "one sentence explaining your decision"}
@@ -85,7 +95,8 @@ public class EmailMergeDecisionService {
                                 List<FitAnalysis> fitAnalyses) {
         try {
             Map<String, Object> emailMap = new LinkedHashMap<>();
-            emailMap.put("company", nvl(email.company()));
+            emailMap.put("companyNameRaw", nvl(email.companyNameRaw()));
+            emailMap.put("companyNameCanonical", nvl(email.company()));
             emailMap.put("jobTitle", nvl(email.jobTitle()));
             emailMap.put("recruiterName", nvl(email.recruiterName()));
             emailMap.put("recruiterEmail", nvl(email.recruiterEmail()));
@@ -98,6 +109,8 @@ public class EmailMergeDecisionService {
             List<Map<String, Object>> candidateMaps = candidates.stream().map(app -> {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("applicationId", app.getId().toString());
+                m.put("companyNameRaw", nvl(app.getCompanyNameRaw()));
+                m.put("companyNameCanonical", nvl(app.getCompanyNameCanonical()));
                 m.put("jobTitle", nvl(app.getJobTitle()));
                 m.put("applicationStatus", nvl(app.getApplicationStatus()));
                 m.put("recruiterName", nvl(app.getRecruiterName()));
@@ -117,6 +130,8 @@ public class EmailMergeDecisionService {
             List<Map<String, Object>> fitAnalysisMaps = fitAnalyses.stream().map(fa -> {
                 Map<String, Object> m = new LinkedHashMap<>();
                 m.put("fitAnalysisId", fa.getId().toString());
+                m.put("companyNameRaw", nvl(fa.getCompanyNameRaw()));
+                m.put("companyNameCanonical", nvl(fa.getCompanyNameCanonical()));
                 m.put("jobTitle", nvl(fa.getJobTitle()));
                 m.put("fitScore", fa.getFitScore());
                 return m;
@@ -131,7 +146,7 @@ public class EmailMergeDecisionService {
 
             JsonNode json = objectMapper.readTree(response);
 
-            String action = json.path("action").asText("CREATE");
+            String action = json.path("action").asText("UNRESOLVED");
             UUID applicationId = parseUuid(json, "applicationId");
             UUID fitAnalysisId = parseUuid(json, "fitAnalysisId");
 
@@ -154,8 +169,8 @@ public class EmailMergeDecisionService {
             return new MergeDecision(action, applicationId, fitAnalysisId, fieldsToSet, fieldsToClear, reasoning);
 
         } catch (Exception e) {
-            log.error("Merge decision failed, falling back to CREATE: {}", e.getMessage(), e);
-            return new MergeDecision("CREATE", null, null, null, null, "fallback due to error");
+            log.error("Merge decision failed; deferring rather than creating a possible duplicate: {}", e.getMessage(), e);
+            return new MergeDecision("UNRESOLVED", null, null, null, null, "merge decision failed");
         }
     }
 

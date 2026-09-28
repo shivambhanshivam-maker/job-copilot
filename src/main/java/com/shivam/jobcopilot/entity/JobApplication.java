@@ -19,6 +19,12 @@ public class JobApplication {
 
     private String company;
 
+    @Column(name = "company_name_raw")
+    private String companyNameRaw;
+
+    @Column(name = "company_name_canonical")
+    private String companyNameCanonical;
+
     private String jobTitle;
 
     private String recruiterName;
@@ -45,11 +51,19 @@ public class JobApplication {
     // Nullable — linked when a FitAnalysis is found matching this application's company + jobTitle
     private UUID fitAnalysisId;
 
+    // Background JD-fit lifecycle for manually created applications.
+    private String fitAnalysisStatus;
+
+    @Column(columnDefinition = "TEXT")
+    private String fitAnalysisError;
+
     // Nullable — CV used when applying for this role
     private UUID cvId;
 
     @Column(columnDefinition = "TEXT")
     private String jobDescriptionText;
+
+    private String jobDescriptionUrl;
 
     @Column(columnDefinition = "TEXT")
     private String notes;
@@ -70,22 +84,58 @@ public class JobApplication {
     public JobApplication() {
     }
 
+    @PreUpdate
+    protected void onUpdate() {
+        synchronizeCompanyNames();
+        this.updatedAt = LocalDateTime.now();
+    }
+
     @PrePersist
-    protected void onCreate() {
+    protected void onPersist() {
+        synchronizeCompanyNames();
         if (this.createdAt == null) this.createdAt = LocalDateTime.now();
         this.updatedAt = LocalDateTime.now();
     }
 
-    @PreUpdate
-    protected void onUpdate() {
-        this.updatedAt = LocalDateTime.now();
+    @PostLoad
+    protected void onLoad() {
+        synchronizeCompanyNames();
+    }
+
+    private void synchronizeCompanyNames() {
+        if (!present(companyNameRaw)) companyNameRaw = company;
+        if (!present(companyNameCanonical)) companyNameCanonical = companyNameRaw;
+        if (!present(company)) company = present(companyNameCanonical) ? companyNameCanonical : companyNameRaw;
+    }
+
+    private boolean present(String value) {
+        return value != null && !value.isBlank();
     }
 
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
 
-    public String getCompany() { return company; }
-    public void setCompany(String company) { this.company = company; }
+    public String getCompany() {
+        return present(company) ? company
+                : present(companyNameRaw) ? companyNameRaw : companyNameCanonical;
+    }
+
+    public void setCompany(String company) {
+        this.company = company;
+        this.companyNameRaw = company;
+        this.companyNameCanonical = company;
+    }
+
+    public String getCompanyNameRaw() { return companyNameRaw != null ? companyNameRaw : company; }
+    public void setCompanyNameRaw(String companyNameRaw) { this.companyNameRaw = companyNameRaw; }
+
+    public String getCompanyNameCanonical() {
+        return companyNameCanonical != null ? companyNameCanonical : getCompany();
+    }
+
+    public void setCompanyNameCanonical(String companyNameCanonical) {
+        this.companyNameCanonical = companyNameCanonical;
+    }
 
     public String getJobTitle() { return jobTitle; }
     public void setJobTitle(String jobTitle) { this.jobTitle = jobTitle; }
@@ -123,11 +173,20 @@ public class JobApplication {
     public UUID getFitAnalysisId() { return fitAnalysisId; }
     public void setFitAnalysisId(UUID fitAnalysisId) { this.fitAnalysisId = fitAnalysisId; }
 
+    public String getFitAnalysisStatus() { return fitAnalysisStatus; }
+    public void setFitAnalysisStatus(String fitAnalysisStatus) { this.fitAnalysisStatus = fitAnalysisStatus; }
+
+    public String getFitAnalysisError() { return fitAnalysisError; }
+    public void setFitAnalysisError(String fitAnalysisError) { this.fitAnalysisError = fitAnalysisError; }
+
     public UUID getCvId() { return cvId; }
     public void setCvId(UUID cvId) { this.cvId = cvId; }
 
     public String getJobDescriptionText() { return jobDescriptionText; }
     public void setJobDescriptionText(String jobDescriptionText) { this.jobDescriptionText = jobDescriptionText; }
+
+    public String getJobDescriptionUrl() { return jobDescriptionUrl; }
+    public void setJobDescriptionUrl(String jobDescriptionUrl) { this.jobDescriptionUrl = jobDescriptionUrl; }
 
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }

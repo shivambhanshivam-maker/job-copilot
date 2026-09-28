@@ -1,34 +1,61 @@
 package com.shivam.jobcopilot.service;
 
 import org.springframework.ai.chat.client.ChatClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Flux;
 
 @Service
 public class AIService {
 
+    private static final Logger log = LoggerFactory.getLogger(AIService.class);
+
     private final ChatClient chatClient;
     private final ChatClient postApplicationChatClient;
+    private final ChatClient requirementExtractionChatClient;
 
     public AIService(ChatClient.Builder chatClientBuilder) {
         this.chatClient = chatClientBuilder
                 .defaultSystem("""
                         You are a job matching assistant. Analyze the CV against the job description.
                         You MUST respond with ONLY a valid JSON object — no markdown, no extra text.
+                        The backend calculates the authoritative fit score and recommendation. Do not calculate or return
+                        a score, sub-scores, or weights. Your job is to extract JD-supported criteria, assess CV evidence,
+                        and provide grounded coaching text.
+
+                        Company identity rules:
+                        - companyNameRaw must preserve the company name supplied in the job context.
+                        - companyNameCanonical is used for matching applications. Preserve meaningful brand words,
+                          including "Company" in names such as "Bain & Company". Remove only clear legal suffixes
+                          such as Inc, LLC, Ltd, Limited, Corp, Corporation, GmbH, PLC, Pvt Ltd, or S.A.
+                        - Do not invent a different employer. If context is insufficient, use the supplied company
+                          name as companyNameCanonical.
 
                         {
-                          "fitScore": <integer 0-100, must equal the weighted average: sum(score * weight / 100) for each sub-score, rounded to nearest integer>,
-                          "recommendation": "<Apply | Optimize & Apply | Ignore — must be derived from fitScore: Apply if ≥80, Optimize & Apply if 60-79, Ignore if <60>",
+                          "companyNameRaw": "<the company name supplied in the job context>",
+                          "companyNameCanonical": "<canonical employer name for matching across applications>",
                           "confidence": "<High | Medium | Low>",
 
-                          "subScores": {
-                            "skillsMatch":     { "score": <0-100>, "weight": <integer> },
-                            "experienceMatch": { "score": <0-100>, "weight": <integer> },
-                            "domainMatch":     { "score": <0-100>, "weight": <integer> },
-                            "impactMatch":     { "score": <0-100>, "weight": <integer> },
-                            "cvPresentation":  { "score": <0-100>, "weight": <integer> }
-                          },
-                          "weightageReasoning": "<one sentence explaining why you weighted the sub-scores this way for this specific role>",
+                          "jdRequirements": [
+                            {
+                              "id": "REQ-1",
+                              "requirement": "<plain-English requirement extracted from the JD>",
+                              "capability": "<concise capability represented by this requirement>",
+                              "importance": "<Core | Supporting | Preferred>",
+                              "relevance": "<Direct | Inferred>",
+                              "evidenceType": "<ownership | artifact | tool | outcome | domain experience | other>",
+                              "sourceExcerpt": "<short excerpt from the JD supporting this requirement>",
+                              "evidence": {
+                                "status": "<Strong | Good | Weak | Missing>",
+                                "evidenceType": "<how the CV demonstrates or fails to demonstrate it>",
+                                "evidenceText": "<specific CV-grounded evidence, or null when Missing>",
+                                "artifact": "<relevant artifact, or null>",
+                                "confidence": "<High | Medium | Low>"
+                              }
+                            }
+                          ],
 
                           "strengthAlignment": [
                             { "strength": "<specific strength>", "category": "<Skills | Experience Depth | Domain | Seniority | Impact Scale>" }
@@ -47,14 +74,6 @@ public class AIService {
                           ]
                         }
 
-                        Sub-score weighting rules:
-                        - All 5 weights must sum to exactly 100.
-                        - Assign higher weight to dimensions the JD emphasises most.
-                        - Domain: weight higher for niche industries (fintech, healthcare, defence, government).
-                        - Experience/Seniority: weight higher for senior, staff, or leadership roles.
-                        - Skills: weight higher for highly technical or tool-specific roles.
-                        - cvPresentation: reflects how well the CV surfaces relevant experience for THIS role — always included.
-
                         Gaps — evaluate each category and include an entry ONLY if a real gap exists:
                         - Skills: specific tools, frameworks, or certifications required but absent from CV.
                         - Experience Depth: insufficient years or breadth in a required area.
@@ -69,16 +88,41 @@ public class AIService {
                         - Medium: JD or CV has some gaps in information.
                         - Low: JD is vague or CV lacks enough detail to assess reliably.
 
-                        Recommendation (must be derived from fitScore — no exceptions):
-                        - Apply (fitScore ≥ 80): strong fit. cvAdjustments must be Medium or Low priority only — these are polish, not blockers.
-                        - Optimize & Apply (fitScore 60–79): good underlying fit but CV needs targeted improvements. cvAdjustments can include High priority — these are what would lift the score.
-                        - Ignore (fitScore < 60): fundamental gaps that CV polish cannot fix. cvAdjustments must be Low priority only.
-
                         cvAdjustments — rules:
                         - action must be one of: "rewrite" (improve an existing bullet), "add" (new bullet to add), "remove" (delete an existing bullet).
                         - cvPoint: for "rewrite" and "remove" actions, quote the exact bullet or line from the CV verbatim. For "add" actions, set to null.
                         - suggestedText: for "rewrite" and "add" actions, provide the concrete improved or new bullet text ready to paste. For "remove" actions, set to null.
                         - Distribute suggestions across the full CV — do not cluster on opening bullets. Target the most impactful improvements regardless of where they appear in the CV.
+                        JD requirement and evidence rules:
+                        - jdRequirements is the source of truth for role-grounded evidence. Only create a requirement when it is explicitly stated in the JD or clearly implied by a responsibility described in the JD.
+                        - Include only the 5-8 most decision-useful criteria. Consolidate overlapping requirements and responsibilities into one criterion. Do not score the same capability twice.
+                        - Core means an explicit minimum qualification or must-have capability, including stated years of experience, required education/certification, or a required skill. A JD statement such as '3-4 years of experience in implementation' is Direct and Core.
+                        - Preferred means an explicitly optional, nice-to-have, or preferred qualification. It is still useful, but it must not carry the same weight as a Core requirement.
+                        - Supporting means a distinct transferable capability derived from a responsibility. Responsibility-derived criteria must be Supporting and Inferred.
+                        - Do not create a criterion from a broad responsibility if it only restates a qualification or describes reporting lines, time windows, oversight, escalation mechanics, pace, accountability, or other operating context.
+                        - Do not include location, hybrid attendance, travel, work authorization, or relocation constraints in jdRequirements; those are separate eligibility checks, not capability fit.
+                        - Do not create requirements from the role title, general industry assumptions, or skills that appear only in the CV.
+                        - relevance must be Direct when the JD names the capability and Inferred when the JD describes a responsibility that clearly requires it.
+                        - sourceExcerpt must be grounded in the JD. Do not invent or paraphrase a requirement without JD support.
+                        - Evaluate CV evidence only against the requirements in jdRequirements. A CV skill with no matching JD requirement must not appear as requirement evidence.
+                        - evidence status Strong means the CV directly and clearly demonstrates the requirement.
+                        - Good means the CV demonstrates a substantial transferable version of the capability.
+                        - Weak means the CV contains only adjacent or limited evidence.
+                        - Missing means the CV does not provide credible evidence.
+                        - For Missing evidence, evidenceText and artifact must be null. Never invent candidate experience.
+                        - Use stable local ids such as REQ-1, REQ-2 so each evidence object maps to exactly one requirement.
+                        - Every evidenceText value must quote a short, exact excerpt from the current CV. If an exact excerpt
+                          cannot be found, use Missing rather than paraphrasing or inventing evidence.
+                        - Core requirements are explicit must-have qualifications. Preferred requirements remain useful competitive
+                          signals even when the JD calls them optional, but Supporting and Preferred criteria must not outweigh Core criteria.
+                        - Emit top-level properties in this exact order so the user can receive the analysis progressively:
+                          jdRequirements, strengthAlignment, differentiation, gaps, positioningAngle, cvAdjustments.
+
+                        Re-analysis mode:
+                        - If the user message contains a Fixed JD rubric, return exactly one jdRequirements entry for every
+                          supplied criterion, preserving each supplied id. Put the new assessment in evidence only.
+                        - In that mode, do not add, remove, rename, or reweight criteria, and do not use the previous evidence
+                          as proof. Reassess the complete updated CV against every supplied criterion.
                         """)
                 .build();
 
@@ -110,10 +154,64 @@ public class AIService {
                         - fitScore: be honest — a low score here means more prep is needed, not that the application was a mistake.
                         """)
                 .build();
+
+        this.requirementExtractionChatClient = this.chatClient.mutate()
+                .defaultSystem("""
+                        You extract job-description requirements for downstream career intelligence.
+                        Return ONLY a valid JSON object with this shape:
+                        {
+                          "jdRequirements": [
+                            {
+                              "id": "REQ-1",
+                              "requirement": "<plain-English requirement extracted from the JD>",
+                              "capability": "<concise capability represented by this requirement>",
+                              "importance": "<Core | Supporting | Preferred>",
+                              "relevance": "<Direct | Inferred>",
+                              "evidenceType": "<ownership | artifact | tool | outcome | domain experience | other>",
+                              "sourceExcerpt": "<short excerpt from the JD supporting this requirement>",
+                              "evidence": {
+                                "status": "<Strong | Good | Weak | Missing>",
+                                "evidenceType": "<how the CV demonstrates or fails to demonstrate it>",
+                                "evidenceText": "<specific CV-grounded evidence, or null when Missing>",
+                                "artifact": "<relevant artifact, or null when Missing>",
+                                "confidence": "<High | Medium | Low>"
+                              }
+                            }
+                          ]
+                        }
+
+                        Rules:
+                        - Extract only requirements explicitly stated in the JD or clearly implied by a JD responsibility.
+                        - Include only the 5-8 most decision-useful criteria. Consolidate overlapping requirements and responsibilities into one criterion. Do not score the same capability twice.
+                        - Core means an explicit minimum qualification or must-have capability, including stated years of experience, required education/certification, or a required skill. A JD statement such as '3-4 years of experience in implementation' is Direct and Core.
+                        - Preferred means an explicitly optional, nice-to-have, or preferred qualification. It remains useful, but is lower priority than Core.
+                        - Supporting means a distinct transferable capability derived from a responsibility. Responsibility-derived criteria must be Supporting and Inferred.
+                        - Do not create a criterion from a broad responsibility if it only restates a qualification or describes reporting lines, time windows, oversight, escalation mechanics, pace, accountability, or other operating context.
+                        - Ignore reporting lines, time windows, oversight, escalation mechanics, location, hybrid attendance, travel, work authorization, and relocation constraints for capability scoring.
+                        - Do not create requirements from the role title, generic industry assumptions, or skills that appear only in the CV.
+                        - relevance is Direct when the JD names the capability and Inferred when a responsibility clearly requires it.
+                        - sourceExcerpt must be grounded in the JD. Do not invent support for a requirement.
+                        - Evaluate CV evidence only against the extracted JD requirements.
+                        - Strong means the CV directly and clearly demonstrates the requirement.
+                        - Good means the CV demonstrates a substantial transferable version of the capability.
+                        - Weak means the CV contains only adjacent or limited evidence.
+                        - Missing means there is no credible CV evidence.
+                        - For Missing evidence, evidenceText and artifact must be null.
+                        - Use stable local ids such as REQ-1, REQ-2 in the order requirements appear.
+                        """)
+                .build();
     }
 
     public String analyze(String cvText, String jobDescription) {
         return chatClient.prompt()
+                .user("CV:\n" + cvText + "\n\nJob Description:\n" + jobDescription)
+                .call()
+                .content();
+    }
+
+    /** Enriches an existing fit analysis with JD-grounded requirements without recalculating fit. */
+    public String extractJdRequirements(String cvText, String jobDescription) {
+        return requirementExtractionChatClient.prompt()
                 .user("CV:\n" + cvText + "\n\nJob Description:\n" + jobDescription)
                 .call()
                 .content();
@@ -126,10 +224,10 @@ public class AIService {
     }
 
     public Flux<String> analyzeStream(String cvText, String jobDescription) {
-        return chatClient.prompt()
+        return logOpenAiFailures(chatClient.prompt()
                 .user("CV:\n" + cvText + "\n\nJob Description:\n" + jobDescription)
                 .stream()
-                .content();
+                .content());
     }
 
     public Flux<String> analyzeStream(String cvText, String jobDescription, String companyName, String roleTitle) {
@@ -155,5 +253,16 @@ public class AIService {
                 .user(userMessage)
                 .stream()
                 .content();
+    }
+
+    private Flux<String> logOpenAiFailures(Flux<String> stream) {
+        return stream.doOnError(error -> {
+            if (error instanceof WebClientResponseException response) {
+                log.error("OpenAI request failed: status={}, body={}", response.getStatusCode(),
+                        response.getResponseBodyAsString());
+            } else {
+                log.error("OpenAI request failed while streaming fit analysis", error);
+            }
+        });
     }
 }

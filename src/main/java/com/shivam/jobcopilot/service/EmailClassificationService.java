@@ -42,9 +42,9 @@ public class EmailClassificationService {
                         it is not job-application related.
 
                         Step 2 — If job-application related, extract these fields:
-                        - company: the employer's brand name only. Strip any legal entity suffixes \
-                        (Inc, LLC, Ltd, Limited, Corp, Corporation, GmbH, Pvt Ltd, S.A., PLC, and similar). \
-                        For example: "Acme Corp" → "Acme", "Google LLC" → "Google", "Infosys BPM Ltd" → "Infosys BPM".
+                         - company_name_raw: the employer name exactly as identified in the email or sender context. Preserve meaningful brand words.
+                         - company_name_canonical: the employer identity used for matching applications across workflows. Remove only clear legal-entity suffixes such as Inc, LLC, Ltd, Limited, Corp, Corporation, GmbH, Pvt Ltd, S.A., or PLC. Do not remove meaningful brand words: "Bain & Company" must remain "Bain & Company", not "Bain". If uncertain, use the supplied employer name.
+                         Use the raw value for display and the canonical value for matching.
                         - job_title: extract the full role title exactly as stated in the email, including any \
                         product name, team, or geographic suffix (e.g. "TikTok Shop - Strategy Manager, Strategy & Analytics, EMEA"). \
                         Do not simplify or truncate it.
@@ -69,7 +69,7 @@ public class EmailClassificationService {
 
                         Respond with ONLY a valid JSON object, no markdown, no extra text.
                         If the email IS job-application related:
-                        {"is_job_related": true, "company": "...", "job_title": "...", "recruiter_name": "...", \
+                         {"is_job_related": true, "company_name_raw": "...", "company_name_canonical": "...", "job_title": "...", "recruiter_name": "...", \
                         "recruiter_email": "...", "application_status": "...", "referral": "...", \
                         "role_category": "...", "interview_date_and_time": "...", "update_summary": "..."}
                         Use null for any field you cannot determine.
@@ -97,14 +97,30 @@ public class EmailClassificationService {
                 return null;
             }
 
+            String companyRaw = firstTextOrNull(json, "company_name_raw", "company");
+            String companyCanonical = firstTextOrNull(json, "company_name_canonical");
+            if (companyCanonical == null) companyCanonical = companyRaw;
+
+            String recruiterEmail = getTextOrNull(json, "recruiter_email");
+            if (isBlank(recruiterEmail) && !isBlank(senderAddress)) {
+                recruiterEmail = senderAddress.trim();
+            }
+
+            String referral = getTextOrNull(json, "referral");
+            if (isBlank(referral)) referral = "N/A";
+
+            String roleCategory = getTextOrNull(json, "role_category");
+            if (isBlank(roleCategory)) roleCategory = "Other";
+
             JobApplicationEmail result = new JobApplicationEmail(
-                    getTextOrNull(json, "company"),
+                    companyRaw,
+                    companyCanonical,
                     getTextOrNull(json, "job_title"),
                     getTextOrNull(json, "recruiter_name"),
-                    getTextOrNull(json, "recruiter_email"),
+                    recruiterEmail,
                     getTextOrNull(json, "application_status"),
-                    getTextOrNull(json, "referral"),
-                    getTextOrNull(json, "role_category"),
+                    referral,
+                    roleCategory,
                     getTextOrNull(json, "interview_date_and_time"),
                     gmailMessageId,
                     getTextOrNull(json, "update_summary")
@@ -125,5 +141,17 @@ public class EmailClassificationService {
             return null;
         }
         return node.asText();
+    }
+
+    private String firstTextOrNull(JsonNode json, String... fields) {
+        for (String field : fields) {
+            String value = getTextOrNull(json, field);
+            if (value != null && !value.isBlank()) return value;
+        }
+        return null;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }

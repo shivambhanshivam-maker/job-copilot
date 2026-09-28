@@ -1,7 +1,10 @@
 package com.shivam.jobcopilot.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public record JobApplicationEmail(
-        String company,
+        String companyNameRaw,
+        String companyNameCanonical,
         String jobTitle,
         String recruiterName,
         String recruiterEmail,
@@ -12,4 +15,9 @@ public record JobApplicationEmail(
         String gmailMessageId,
         String updateSummary
 ) {
+    @JsonProperty("company")
+    public String company() {
+        return companyNameCanonical != null && !companyNameCanonical.isBlank()
+                ? companyNameCanonical : companyNameRaw;
+    }
 }
